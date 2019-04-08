@@ -27,7 +27,7 @@ import software.aws.toolkits.jetbrains.services.lambda.sam.SamTemplateUtils
 import software.aws.toolkits.resources.message
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.CompletionStage
+import java.util.concurrent.ExecutionException
 
 abstract class LambdaBuilder {
     /**
@@ -41,7 +41,7 @@ abstract class LambdaBuilder {
         envVars: Map<String, String>,
         samOptions: SamOptions,
         onStart: (ProcessHandler) -> Unit = {}
-    ): CompletionStage<BuiltLambda>
+    ): BuiltLambda
 
     open fun buildLambdaFromTemplate(
         module: Module,
@@ -49,7 +49,7 @@ abstract class LambdaBuilder {
         logicalId: String,
         samOptions: SamOptions,
         onStart: (ProcessHandler) -> Unit = {}
-    ): CompletionStage<BuiltLambda> {
+    ): BuiltLambda {
         val future = CompletableFuture<BuiltLambda>()
         val codeLocation = ReadAction.compute<String, Throwable> {
             SamTemplateUtils.findFunctionsFromTemplate(
@@ -66,74 +66,76 @@ abstract class LambdaBuilder {
                 )
         }
 
-        ApplicationManager.getApplication().executeOnPooledThread {
-            val buildDir = FileUtil.createTempDirectory("lambdaBuild", null, true).toPath()
+        val buildDir = FileUtil.createTempDirectory("lambdaBuild", null, true).toPath()
 
-            val commandLine = SamCommon.getSamCommandLine()
-                .withParameters("build")
-                .withParameters("--template")
-                .withParameters(templateLocation.toString())
-                .withParameters("--build-dir")
-                .withParameters(buildDir.toString())
+        val commandLine = SamCommon.getSamCommandLine()
+            .withParameters("build")
+            .withParameters("--template")
+            .withParameters(templateLocation.toString())
+            .withParameters("--build-dir")
+            .withParameters(buildDir.toString())
 
-            if (samOptions.buildInContainer) {
-                commandLine.withParameters("--use-container")
-            }
-
-            if (samOptions.skipImagePull) {
-                commandLine.withParameters("--skip-pull-image")
-            }
-
-            samOptions.dockerNetwork?.let {
-                if (it.isNotBlank()) {
-                    commandLine.withParameters("--docker-network")
-                        .withParameters(it.trim())
-                }
-            }
-
-            val pathMappings = listOf(
-                PathMapping(templateLocation.parent.resolve(codeLocation).toString(), "/"),
-                PathMapping(buildDir.resolve(logicalId).toString(), "/")
-            )
-
-            val processHandler = ProcessHandlerFactory.getInstance().createColoredProcessHandler(commandLine)
-            processHandler.addProcessListener(object : ProcessAdapter() {
-                override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
-                    // TODO: We should find a way to show the output of this in the UI
-                    LOG.info { event.text }
-
-                    if (ApplicationManager.getApplication().isUnitTestMode) {
-                        println("SAM CLI: ${event.text}")
-                    }
-                }
-
-                override fun processTerminated(event: ProcessEvent) {
-                    if (event.exitCode == 0) {
-                        val builtTemplate = buildDir.resolve("template.yaml")
-
-                        if (!builtTemplate.exists()) {
-                            future.completeExceptionally(IllegalStateException("Failed to locate built template, $builtTemplate does not exist"))
-                        }
-
-                        future.complete(
-                            BuiltLambda(
-                                builtTemplate,
-                                buildDir.resolve(logicalId),
-                                pathMappings
-                            )
-                        )
-                    } else {
-                        future.completeExceptionally(IllegalStateException(message("sam.build.failed")))
-                    }
-                }
-            })
-
-            onStart.invoke(processHandler)
-
-            processHandler.startNotify()
+        if (samOptions.buildInContainer) {
+            commandLine.withParameters("--use-container")
         }
 
-        return future
+        if (samOptions.skipImagePull) {
+            commandLine.withParameters("--skip-pull-image")
+        }
+
+        samOptions.dockerNetwork?.let {
+            if (it.isNotBlank()) {
+                commandLine.withParameters("--docker-network")
+                    .withParameters(it.trim())
+            }
+        }
+
+        val pathMappings = listOf(
+            PathMapping(templateLocation.parent.resolve(codeLocation).toString(), "/"),
+            PathMapping(buildDir.resolve(logicalId).toString(), "/")
+        )
+
+        val processHandler = ProcessHandlerFactory.getInstance().createColoredProcessHandler(commandLine)
+        processHandler.addProcessListener(object : ProcessAdapter() {
+            override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
+                // TODO: We should find a way to show the output of this in the UI
+                LOG.info { event.text }
+
+                if (ApplicationManager.getApplication().isUnitTestMode) {
+                    println("SAM CLI: ${event.text}")
+                }
+            }
+
+            override fun processTerminated(event: ProcessEvent) {
+                if (event.exitCode == 0) {
+                    val builtTemplate = buildDir.resolve("template.yaml")
+
+                    if (!builtTemplate.exists()) {
+                        future.completeExceptionally(IllegalStateException("Failed to locate built template, $builtTemplate does not exist"))
+                    }
+
+                    future.complete(
+                        BuiltLambda(
+                            builtTemplate,
+                            buildDir.resolve(logicalId),
+                            pathMappings
+                        )
+                    )
+                } else {
+                    future.completeExceptionally(IllegalStateException(message("sam.build.failed")))
+                }
+            }
+        })
+
+        onStart.invoke(processHandler)
+
+        processHandler.startNotify()
+
+        return try {
+            future.get() // Wait for sam process to die
+        } catch (e: ExecutionException) {
+            throw e.cause ?: e
+        }
     }
 
     open fun packageLambda(
@@ -143,14 +145,15 @@ abstract class LambdaBuilder {
         runtime: Runtime,
         samOptions: SamOptions,
         onStart: (ProcessHandler) -> Unit = {}
-    ): CompletionStage<Path> = buildLambda(module, handlerElement, handler, runtime, emptyMap(), samOptions, onStart)
-        .thenApply { lambdaLocation ->
-            val zipLocation = FileUtil.createTempFile("builtLambda", "zip", true)
-            Compressor.Zip(zipLocation).use {
-                it.addDirectory(lambdaLocation.codeLocation.toFile())
-            }
-            zipLocation.toPath()
+    ): Path {
+        val builtLambda = buildLambda(module, handlerElement, handler, runtime, emptyMap(), samOptions, onStart)
+
+        val zipLocation = FileUtil.createTempFile("builtLambda", "zip", true)
+        Compressor.Zip(zipLocation).use {
+            it.addDirectory(builtLambda.codeLocation.toFile())
         }
+        return zipLocation.toPath()
+    }
 
     companion object : RuntimeGroupExtensionPointObject<LambdaBuilder>(
         ExtensionPointName("aws.toolkit.lambda.builder")

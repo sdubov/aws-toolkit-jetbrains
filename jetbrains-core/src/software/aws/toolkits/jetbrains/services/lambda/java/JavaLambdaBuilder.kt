@@ -18,7 +18,6 @@ import software.aws.toolkits.jetbrains.services.lambda.LambdaBuilder
 import software.aws.toolkits.jetbrains.services.lambda.sam.SamOptions
 import software.aws.toolkits.jetbrains.services.lambda.sam.SamTemplateUtils
 import software.aws.toolkits.resources.message
-import java.util.concurrent.CompletionStage
 
 class JavaLambdaBuilder : LambdaBuilder() {
     override fun buildLambda(
@@ -29,7 +28,7 @@ class JavaLambdaBuilder : LambdaBuilder() {
         envVars: Map<String, String>,
         samOptions: SamOptions,
         onStart: (ProcessHandler) -> Unit
-    ): CompletionStage<BuiltLambda> {
+    ): BuiltLambda {
         val baseDir = when {
             isGradle(module) -> getGradleProjectLocation(module)
             isMaven(module) -> getPomLocation(module)

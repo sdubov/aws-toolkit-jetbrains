@@ -16,7 +16,6 @@ import software.aws.toolkits.jetbrains.services.lambda.BuiltLambda
 import software.aws.toolkits.jetbrains.services.lambda.LambdaBuilder
 import software.aws.toolkits.jetbrains.services.lambda.sam.SamOptions
 import software.aws.toolkits.jetbrains.services.lambda.sam.SamTemplateUtils
-import java.util.concurrent.CompletionStage
 
 class PythonLambdaBuilder : LambdaBuilder() {
     override fun buildLambda(
@@ -27,7 +26,7 @@ class PythonLambdaBuilder : LambdaBuilder() {
         envVars: Map<String, String>,
         samOptions: SamOptions,
         onStart: (ProcessHandler) -> Unit
-    ): CompletionStage<BuiltLambda> {
+    ): BuiltLambda {
         val handlerVirtualFile = ReadAction.compute<VirtualFile, Throwable> {
             handlerElement.containingFile?.virtualFile
                 ?: throw IllegalArgumentException("Handler file must be backed by a VirtualFile")
