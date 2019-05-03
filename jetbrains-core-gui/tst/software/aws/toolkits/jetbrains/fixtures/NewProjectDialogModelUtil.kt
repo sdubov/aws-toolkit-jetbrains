@@ -21,27 +21,31 @@ import com.intellij.testGuiFramework.util.step
 private const val AWS_GROUP = "AWS"
 
 fun NewProjectDialogModel.assertAwsGroupPresent() {
-    with(connectDialog()) {
-        // TODO: PyCharm doesnt have Empty Project
-        val list = jList(NewProjectDialogModel.Constants.groupEmptyProject, timeout = Timeouts.seconds05)
+    with(guiTestCase) {
+        with(connectDialog()) {
+            // TODO: PyCharm doesnt have Empty Project
+            val list = jList(NewProjectDialogModel.Constants.groupEmptyProject, timeout = Timeouts.seconds05)
 
-        step("check '$AWS_GROUP' group is present in the New Project dialog") {
-            assert(list.contents().contains(AWS_GROUP)) {
-                "'$AWS_GROUP' group is absent"
+            step("check '$AWS_GROUP' group is present in the New Project dialog") {
+                assert(list.contents().contains(AWS_GROUP)) {
+                    "'$AWS_GROUP' group is absent"
+                }
             }
         }
     }
 }
 
 fun NewProjectDialogModel.selectAwsProjectGroup() {
-    with(connectDialog()) {
-        step("select '$AWS_GROUP' project group") {
-            waitLoadingTemplates()
-            assertAwsGroupPresent()
+    with(guiTestCase) {
+        with(connectDialog()) {
+            step("select '$AWS_GROUP' project group") {
+                waitLoadingTemplates()
+                assertAwsGroupPresent()
 
-            val list = jList(AWS_GROUP)
-            step("click '$AWS_GROUP'") { list.clickItem(AWS_GROUP) }
-            list.requireSelection(AWS_GROUP)
+                val list = jList(AWS_GROUP)
+                step("click '$AWS_GROUP'") { list.clickItem(AWS_GROUP) }
+                list.requireSelection(AWS_GROUP)
+            }
         }
     }
 }
