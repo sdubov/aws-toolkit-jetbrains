@@ -4,7 +4,8 @@
 package software.aws.toolkits.jetbrains.ui.wizard
 
 import com.intellij.execution.process.CapturingProcessHandler
-import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.runInEdt
+import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
@@ -19,7 +20,7 @@ object SamInitRunner {
         runtime: Runtime,
         location: String? = null,
         dependencyManager: String? = null
-    ) = ApplicationManager.getApplication().runWriteAction {
+    ) {
         // set output to a temp dir
         val tempDir = createTempDir()
         val commandLine = SamCommon.getSamCommandLine()
@@ -48,6 +49,10 @@ object SamInitRunner {
             throw RuntimeException("${message("sam.init.execution_error")}: ${process.stderrLines.last()}")
         }
 
-        FileUtil.copyDirContent(tempDir.resolve(name), VfsUtil.virtualToIoFile(outputDir))
+        runInEdt {
+            runWriteAction {
+                FileUtil.copyDirContent(tempDir.resolve(name), VfsUtil.virtualToIoFile(outputDir))
+            }
+        }
     }
 }

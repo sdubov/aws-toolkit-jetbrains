@@ -7,22 +7,22 @@ import com.intellij.ide.util.projectWizard.ModuleBuilder
 import com.intellij.ide.util.projectWizard.ModuleWizardStep
 import com.intellij.ide.util.projectWizard.SettingsStep
 import com.intellij.ide.util.projectWizard.WizardContext
-import com.intellij.openapi.application.WriteAction
+import com.intellij.openapi.application.runInEdt
 import com.intellij.openapi.module.ModuleType
 import com.intellij.openapi.module.ModuleTypeManager
 import com.intellij.openapi.options.ConfigurationException
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.roots.ContentEntry
 import com.intellij.openapi.roots.ModifiableRootModel
-import com.intellij.openapi.roots.ModuleRootManager
+import com.intellij.openapi.roots.ModuleRootModificationUtil
 import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.roots.ui.configuration.ModulesProvider
 import com.intellij.openapi.startup.StartupManager
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.ProjectTemplatesFactory
-import com.intellij.util.DisposeAwareRunnable
 import icons.AwsIcons
-import software.amazon.awssdk.services.lambda.model.Runtime
-import software.aws.toolkits.core.utils.error
 import software.aws.toolkits.core.utils.getLogger
 import software.aws.toolkits.jetbrains.services.lambda.runtimeGroup
 import software.aws.toolkits.resources.message
@@ -59,42 +59,18 @@ class SamProjectBuilder(private val generator: SamProjectGenerator) : ModuleBuil
         val contentEntry: ContentEntry = doAddContentEntry(rootModel) ?: throw Exception(message("sam.init.error.no.project.basepath"))
         val outputDir: VirtualFile = contentEntry.file ?: throw Exception(message("sam.init.error.no.virtual.file"))
 
-        val samTemplate = generator.settings.template
-        samTemplate.build(rootModel.project, selectedRuntime, outputDir)
-
-        runPostModuleCreationStep(selectedRuntime, outputDir, rootModel, samTemplate)
-    }
-
-    private fun runPostModuleCreationStep(
-        runtime: Runtime,
-        contentRoot: VirtualFile,
-        rootModel: ModifiableRootModel,
-        template: SamProjectTemplate
-    ) {
-        val project = rootModel.project
-        if (project.isDisposed) return
-
-        if (!project.isInitialized) {
-            StartupManager.getInstance(project).registerPostStartupActivity(
-                DisposeAwareRunnable.create(
-                    {
-                        // Since we will be running later, we will need to make a new ModifiableRootModel
-                        val postStartRootModel = ModuleRootManager.getInstance(rootModel.module).modifiableModel
-                        try {
-                            template.postCreationAction(runtime, contentRoot, postStartRootModel)
-                            WriteAction.run<Exception> {
-                                postStartRootModel.commit()
-                            }
-                        } catch (e: Exception) {
-                            LOG.error(e) { "Exception thrown during postCreationAction" }
-                            postStartRootModel.dispose()
+        StartupManager.getInstance(rootModel.project).runWhenProjectIsInitialized {
+            ProgressManager.getInstance().run(object : Task.Backgroundable(rootModel.project, message("sam.init.generating.template"), false) {
+                override fun run(indicator: ProgressIndicator) {
+                    ModuleRootModificationUtil.updateModel(rootModel.module) { model ->
+                        val samTemplate = generator.settings.template
+                        samTemplate.build(project, selectedRuntime, outputDir)
+                        runInEdt {
+                            samTemplate.postCreationAction(selectedRuntime, outputDir, model)
                         }
-                    },
-                    project
-                )
-            )
-        } else {
-            template.postCreationAction(runtime, contentRoot, rootModel)
+                    }
+                }
+            })
         }
     }
 

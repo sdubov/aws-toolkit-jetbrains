@@ -13,6 +13,9 @@ import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.openapi.options.SettingsEditor
 import com.intellij.openapi.options.SettingsEditorGroup
 import com.intellij.openapi.options.ShowSettingsUtil
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.psi.NavigatablePsiElement
 import com.intellij.psi.PsiElement
@@ -50,6 +53,22 @@ class LocalLambdaRunConfigurationFactory(configuration: LambdaRunConfiguration) 
 class LocalLambdaRunConfiguration(project: Project, factory: ConfigurationFactory) :
     LambdaRunConfigurationBase<LocalLambdaOptions>(project, factory, "SAM CLI"),
     RefactoringListenerProvider {
+
+    private var isSamValidationCompleted = false
+    private var samValidationResult: String? = null
+
+    init {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "aaa", false) {
+            override fun run(indicator: ProgressIndicator) {
+                samValidationResult = SamCommon.validate()
+            }
+
+            override fun onFinished() {
+                isSamValidationCompleted = true
+            }
+        })
+    }
+
     override fun getOptions() = super.getOptions() as LocalLambdaOptions
 
     override fun getConfigurationEditor(): SettingsEditor<LocalLambdaRunConfiguration> {
@@ -60,7 +79,10 @@ class LocalLambdaRunConfiguration(project: Project, factory: ConfigurationFactor
     }
 
     override fun checkConfiguration() {
-        SamCommon.validate()?.let {
+        if (!isSamValidationCompleted)
+            throw RuntimeConfigurationError(message("lambda.run_configuration.sam.validation.in_progress"))
+
+        samValidationResult?.let {
             throw RuntimeConfigurationError(message("lambda.run_configuration.sam.invalid_executable", it)) {
                 ShowSettingsUtil.getInstance().showSettingsDialog(project, AwsSettingsConfigurable::class.java)
             }
