@@ -1,7 +1,39 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import java.util.regex.Pattern
+
+buildscript {
+    ext.rd_version = "0.192.36"
+
+    repositories {
+        maven { url 'https://www.myget.org/F/rd-snapshots/maven/' }
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath "com.jetbrains.rd:rd-gen:$rd_version"
+    }
+}
+
+def backendGroup = 'backend'
+def protocolGroup = 'protocol'
+
+def resharperPluginPath = new File(projectDir, "ReSharper.AWS")
+def buildConfiguration = ext.properties["BuildConfiguration"] ?: "Debug"
+
+def pluginFiles = [
+        "AWS.Daemon/bin/$buildConfiguration/net461/AWS.Daemon.dll",
+        "AWS.Daemon/bin/$buildConfiguration/net461/AWS.Daemon.pdb",
+        "AWS.Psi/bin/$buildConfiguration/net461/AWS.Psi.dll",
+        "AWS.Psi/bin/$buildConfiguration/net461/AWS.Psi.pdb"
+]
+
+def nugetConfigPath = new File(projectDir, "NuGet.Config")
+def riderSdkVersionPropsPath = new File(resharperPluginPath, "RiderSdkPackageVersion.props")
+
 apply plugin: 'org.jetbrains.intellij'
+apply plugin: 'com.jetbrains.rdgen'
 
 dependencies {
     compile project(":jetbrains-core")
@@ -24,6 +56,121 @@ intellij {
     instrumentCode = false
 }
 
+task writeRiderSdkVersionProps {
+    group = backendGroup
+
+    doLast {
+        def riderSdkVersion = getRiderSdkPackageVersion()
+        def configText = """<Project>
+  <PropertyGroup>
+    <RiderSDKVersion>[${riderSdkVersion}]</RiderSDKVersion>
+  </PropertyGroup>
+</Project>
+"""
+        writeTextIfChanged(riderSdkVersionPropsPath, configText)
+    }
+}
+
+task writeNuGetConfig {
+    group = backendGroup
+
+    doLast {
+        def nugetPath = getNugetPackagesPath()
+        def configText = """<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <add key="resharper-sdk" value="${nugetPath}" />
+  </packageSources>
+</configuration>
+"""
+        writeTextIfChanged(nugetConfigPath, configText)
+    }
+}
+
+task prepare {
+    group = backendGroup
+    dependsOn writeNuGetConfig, writeRiderSdkVersionProps
+
+    doLast {
+        exec {
+            executable = "dotnet"
+            args = ["restore", "${resharperPluginPath.canonicalPath}/ReSharper.AWS.sln" ]
+        }
+    }
+}
+
+task generateModel(type: tasks.getByName("rdgen").class) {
+    group = protocolGroup
+
+    def modelDir = new File(projectDir, "protocol/model")
+    def csOutput = new File(resharperPluginPath, "src/AWS.Daemon/Protocol")
+    def ktOutput = new File(projectDir, "src/software/aws/toolkits/jetbrains/protocol")
+
+    // NOTE: classpath is evaluated lazily, at execution time, because it comes from the unzipped
+    // intellij SDK, which is extracted in afterEvaluate
+    params {
+        verbose = true
+        hashFolder = "build/rdgen"
+
+        logger.info("Configuring rdgen params")
+        classpath {
+            logger.info("Calculating classpath for rdgen, intellij.ideaDependency is: ${intellij.ideaDependency}")
+            def sdkPath = intellij.ideaDependency.classes
+            def rdLibDirectory = new File(sdkPath, "lib/rd").canonicalFile
+            
+            "$rdLibDirectory/rider-model.jar"
+        }
+        sources modelDir.canonicalPath
+        packages = "protocol.model"
+
+        generator {
+            language = "kotlin"
+            transform = "asis"
+            root = "com.jetbrains.rider.model.nova.ide.IdeRoot"
+            namespace = "com.jetbrains.rider.model"
+            directory = "$ktOutput"
+        }
+
+        generator {
+            language = "csharp"
+            transform = "reversed"
+            root = "com.jetbrains.rider.model.nova.ide.IdeRoot"
+            namespace = "JetBrains.Rider.Model"
+            directory = "$csOutput"
+        }
+    }
+}
+
+task buildReSharperPlugin {
+    group = backendGroup
+    dependsOn prepare, generateModel
+
+    doLast {
+        exec {
+            executable = "msbuild"
+            args = [ "${resharperPluginPath.canonicalPath}/ReSharper.AWS.sln" ]
+        }
+    }
+}
+
+tasks.withType(prepareSandbox.class).all {
+    dependsOn buildReSharperPlugin
+
+    def files = pluginFiles.collect { "$resharperPluginPath/src/$it" }
+
+    files.each {
+        from(it, { into("${intellij.pluginName}/dotnet") })
+    }
+
+    doLast {
+        files.each {
+            def file = new File(it)
+            if (!file.isFile()) throw new GradleException("File $file does not exist")
+            logger.warn("$name: ${file.name} -> ${destinationDir}/${intellij.pluginName}/dotnet")
+        }
+    }
+}
+
 test {
     useTestNG()
     ignoreFailures = true
@@ -35,4 +182,61 @@ runIde {
 
 jar {
     archiveBaseName = 'aws-intellij-toolkit-rider'
+
+}
+
+defaultTasks("prepare")
+
+private File getNugetPackagesPath() {
+    def sdkPath = intellij.ideaDependency.classes
+
+    println("SDK path: $sdkPath")
+    def path = new File(sdkPath, "lib/ReSharperHostSdk")
+
+    println("NuGet packages: $path")
+    if (!path.isDirectory()) throw GradleException("${path} does not exist or not a directory")
+
+    return path
+}
+
+private String getRiderSdkPackageVersion() {
+    def sdkPackageName = "JetBrains.Rider.SDK"
+
+    def regex = Pattern.compile("JetBrains\\.Rider\\.SDK\\.([\\d\\.]+.*)\\.nupkg")
+    def versions = getNugetPackagesPath()
+            .listFiles()
+            .collect { file ->
+                def matches = regex.matcher(file.name)
+                if (matches.matches()) {
+                    matches[0][1]
+                } else {
+                    null
+                }
+            }
+
+    versions.removeAll([null])
+
+    if (versions.size() > 1)
+        throw GradleException("Found multiple SDK packages matches name $sdkPackageName in $nugetPackagesPath")
+
+    if (versions.size() == 0)
+        throw GradleException("$sdkPackageName package is not found in $nugetPackagesPath")
+
+    def version = versions.first()
+    println("$sdkPackageName version is $version")
+
+    return version
+}
+
+private static void writeTextIfChanged(File file, String content) {
+    def bytes = content.bytes
+
+    if (!file.isFile() || byteArrayToHexString(file.readBytes()) != byteArrayToHexString(bytes)) {
+        println("Writing ${file.canonicalPath}")
+        file.withOutputStream { it.write(bytes) }
+    }
+}
+
+private static String byteArrayToHexString(byte[] byteArray) {
+    return byteArray.encodeHex().toString()
 }

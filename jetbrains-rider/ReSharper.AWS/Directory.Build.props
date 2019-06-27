@@ -1,0 +1,23 @@
+<Project>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <DefineConstants>TRACE;DEBUG;JET_MODE_ASSERT</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+  
+  <PropertyGroup>
+    <FantomasVersion>[2.9.9]</FantomasVersion>
+    <FSharpCompilerServiceVersion>[28.0.5]</FSharpCompilerServiceVersion>
+    <FSharpCoreVersion>[4.6.2]</FSharpCoreVersion>
+    <ValueTupleVersion>[4.5.0]</ValueTupleVersion>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)ReSharper.AWS.snk</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
+
+  <Import Project="RiderSdkPackageVersion.props" />
+</Project>

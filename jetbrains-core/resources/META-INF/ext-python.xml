@@ -8,4 +8,8 @@
         <handlerResolver runtimeGroup="PYTHON" implementation="software.aws.toolkits.jetbrains.services.lambda.python.PythonLambdaHandlerResolver"/>
         <sam.debugSupport runtimeGroup="PYTHON" implementation="software.aws.toolkits.jetbrains.services.lambda.python.PythonSamDebugSupport"/>
     </extensions>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <codeInsight.lineMarkerProvider id="LambdaLineMarker" language="" implementationClass="software.aws.toolkits.jetbrains.services.lambda.upload.LambdaLineMarker"/>
+    </extensions>
 </idea-plugin>

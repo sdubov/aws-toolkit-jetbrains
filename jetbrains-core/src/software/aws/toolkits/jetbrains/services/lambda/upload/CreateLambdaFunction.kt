@@ -67,7 +67,8 @@ class CreateLambdaFunction(
             .mapNotNull { it.handler() }
             .toSet()
 
-        val allowAction = lambdaHandlerResolver.determineHandlers(element, element.containingFile.virtualFile)
+        val handlers = lambdaHandlerResolver.determineHandlers(element, element.containingFile.virtualFile)
+        val allowAction = handlers
             .none { it in templateFunctionHandlers }
 
         e.presentation.isVisible = allowAction
