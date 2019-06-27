@@ -9,9 +9,12 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.NavigatablePsiElement
 import com.intellij.psi.PsiElement
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.util.contextOfType
+import com.intellij.psi.util.parentOfType
 import com.jetbrains.rd.framework.impl.RpcTimeouts
 import com.jetbrains.rd.util.lifetime.Lifetime
 import com.jetbrains.rd.util.threading.SpinWait
+import com.jetbrains.rider.ideaInterop.fileTypes.csharp.CSharpLanguage
 import com.jetbrains.rider.model.MethodExistingRequest
 import com.jetbrains.rider.model.RdMethodInfo
 import com.jetbrains.rider.model.backendPsiHelperModel
@@ -62,9 +65,21 @@ class DotNetLambdaHandlerResolver : LambdaHandlerResolver {
         return arrayOf(RiderLambdaHandlerFakePsiElement(project, "$assemblyName::$type::$methodName", fieldId))
     }
 
+    /**
+     * public APIGatewayProxyResponse FunctionHandler(APIGatewayProxyRequest apigProxyEvent, ILambdaContext context)
+     *
+     * returnType handler-name(inputType input, ILambdaContext context) {
+     *
+     * HelloWorld::HelloWorld.Function::FunctionHandler
+     */
     override fun determineHandler(element: PsiElement): String? {
-        if (element !is RiderLambdaHandlerFakePsiElement) return null
-        return element.name
+        if (element.language != CSharpLanguage) return null
+        if (element.text != "ILambdaContext") return null
+
+        val assemblyName = element.containingFile.name
+        val type = "HelloWorld.Function"
+        val methodName = "FunctionHandler"
+        return "$assemblyName::$type::$methodName"
     }
 
     override fun determineHandlers(element: PsiElement, file: VirtualFile): Set<String> {
@@ -98,6 +113,13 @@ class DotNetLambdaHandlerResolver : LambdaHandlerResolver {
         }
 
         return isMethodExists
+    }
+
+    /**
+     * Check if we should show a line marker to run Lambda based on
+     */
+    override fun shouldShowLineMarker(handler: String): Boolean {
+        return handler.split("::").size == 3
     }
 
     private fun isMethodExists(project: Project, assemblyName: String, type: String, methodName: String): Boolean {

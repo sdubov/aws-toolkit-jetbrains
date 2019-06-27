@@ -20,7 +20,10 @@ class HandlerCompletionProvider(private val project: Project) : TextCompletionPr
     override fun getPrefix(text: String, offset: Int): String? = text
 
     override fun fillCompletionVariants(parameters: CompletionParameters, prefix: String, result: CompletionResultSet) {
-        LambdaHandlerIndex.listHandlers(project).forEach { result.addElement(LookupElementBuilder.create(it)) }
+        val handlers = LambdaHandlerIndex.listHandlers(project)
+        handlers.forEach { handler ->
+            result.addElement(LookupElementBuilder.create(handler))
+        }
         result.stopHere()
     }
 

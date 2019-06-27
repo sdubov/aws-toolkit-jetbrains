@@ -1,7 +1,11 @@
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+def backendGroup = 'backend'
+
 apply plugin: 'org.jetbrains.intellij'
+
+//bknd sdk: 2019.2.0-eap02
 
 dependencies {
     compile project(":jetbrains-core")
@@ -22,6 +26,75 @@ intellij {
     // snapshots repository. The task is failed due to unable to find related IC sources.
     downloadSources = false
     instrumentCode = false
+}
+
+
+// aaaaaaaaaaaa
+
+def repoRoot = projectDir.parentFile
+def resharperPluginPath = new File(repoRoot, "ReSharper.AWS")
+def buildConfiguration = ext.properties["BuildConfiguration"] ?: "Debug"
+
+def libFiles = [
+        "FSharp.Common/bin/$buildConfiguration/net461/FSharp.Core.dll",
+        "FSharp.Common/bin/$buildConfiguration/net461/FSharp.Compiler.Service.dll", // todo: add pdb after next repack
+        "FSharp.Common/bin/$buildConfiguration/net461/FSharp.Compiler.Interactive.Settings.dll",
+        "FSharp.Psi.Features/bin/$buildConfiguration/net461/Fantomas.dll"
+]
+
+def pluginFiles = [
+        "AWS.Daemon/bin/$buildConfiguration/net461/AWS.Daemon.dll",
+        "AWS.Daemon/bin/$buildConfiguration/net461/AWS.Daemon.pdb",
+        "AWS.Psi/bin/$buildConfiguration/net461/AWS.Psi.dll",
+        "AWS.Psi/bin/$buildConfiguration/net461/AWS.Psi.pdb"
+]
+
+def nugetPackagesPath() {
+    def sdkPath = intellij.ideaDependency.classes
+
+    println("SDK path: $sdkPath")
+    def path = new File(sdkPath, "lib/ReSharperHostSdk")
+
+    println("NuGet packages: $path")
+    if (!path.isDirectory) error("$path does not exist or not a directory")
+
+    return path
+}
+
+def riderSdkPackageVersion() {
+    def sdkPackageName = "JetBrains.Rider.SDK"
+
+    def regex = Regex("${Regex.escape(sdkPackageName)}\\.([\\d\\.]+.*)\\.nupkg")
+    def version = nugetPackagesPath
+            .listFiles()
+            .mapNotNull { regex.matchEntire(it.name)?.groupValues?.drop(1)?.first() }
+            .singleOrNull() ?: error("$sdkPackageName package is not found in $nugetPackagesPath (or multiple matches)")
+    println("$sdkPackageName version is $version")
+
+    return version
+}
+
+def nugetConfigPath = new File(repoRoot, "NuGet.Config")
+def riderSdkVersionPropsPath = new File(resharperPluginPath, "RiderSdkPackageVersion.props")
+
+def riderFSharpTargetsGroup = "rider-fsharp"
+
+def writeTextIfChanged(File file, String content) {
+    def bytes = content.toByteArray()
+
+    if (!exists() || readBytes().toHexString() != bytes.toHexString()) {
+        println("Writing $path")
+        writeBytes(bytes)
+    }
+}
+
+// aaaaaaaaaaaa
+
+tasks.withType(PrepareSandboxTask) {
+
+    def files = pluginFiles
+    files = files.map { "$resharperPluginPath/src/$it" }
+
 }
 
 test {

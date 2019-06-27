@@ -50,14 +50,18 @@ class LambdaHandlerIndex : ScalarIndexExtension<String>() {
 
         val handlers = mutableMapOf<String, Void?>()
 
-        fileContent.psiFile.acceptLeafNodes(object : PsiElementVisitor() {
+        val visitor = object : PsiElementVisitor() {
             override fun visitElement(element: PsiElement?) {
                 super.visitElement(element)
                 element?.run {
-                    handlerIdentifier.determineHandlers(this, fileContent.file).forEach { handlers[it] = null }
+                    handlerIdentifier.determineHandlers(this, fileContent.file).forEach { handler ->
+                        handlers[handler] = null
+                    }
                 }
             }
-        })
+        }
+
+        fileContent.psiFile.acceptLeafNodes(visitor)
 
         handlers
     }
@@ -83,11 +87,11 @@ class LambdaHandlerIndex : ScalarIndexExtension<String>() {
 
         fun listHandlers(project: Project): Collection<String> {
             val index = FileBasedIndex.getInstance()
-            return index.getAllKeys(LambdaHandlerIndex.NAME, project)
-                .filter {
-                    // Filters out out-of-date data
-                    index.getValues(LambdaHandlerIndex.NAME, it, GlobalSearchScope.projectScope(project)).isNotEmpty()
-                }
+            val keys = index.getAllKeys(NAME, project)
+            return keys.filter {
+                // Filters out out-of-date data
+                index.getValues(NAME, it, GlobalSearchScope.projectScope(project)).isNotEmpty()
+            }
         }
     }
 }

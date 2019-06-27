@@ -5,6 +5,7 @@
 
 import ChangeLogPlugin.Companion.NAME
 import org.gradle.api.DefaultTask
+import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.tasks.Input
@@ -27,6 +28,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Scanner
 import java.util.UUID
+import java.util.regex.Pattern
 
 /* ktlint-disable custom-ktlint-rules:log-not-lazy */
 class ChangeLogPlugin : Plugin<Project> {
