@@ -23,6 +23,7 @@ import com.intellij.openapi.startup.StartupManager
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.ProjectTemplatesFactory
 import icons.AwsIcons
+import software.aws.toolkits.core.utils.error
 import software.aws.toolkits.core.utils.getLogger
 import software.aws.toolkits.jetbrains.services.lambda.runtimeGroup
 import software.aws.toolkits.resources.message
@@ -66,7 +67,12 @@ class SamProjectBuilder(private val generator: SamProjectGenerator) : ModuleBuil
                         val samTemplate = generator.settings.template
                         samTemplate.build(project, selectedRuntime, outputDir)
                         runInEdt {
-                            samTemplate.postCreationAction(selectedRuntime, outputDir, model)
+                            try {
+                                samTemplate.postCreationAction(selectedRuntime, outputDir, model)
+                            } catch (t: Throwable) {
+                                LOG.error(t) { "Exception thrown during postCreationAction" }
+                                model.dispose()
+                            }
                         }
                     }
                 }

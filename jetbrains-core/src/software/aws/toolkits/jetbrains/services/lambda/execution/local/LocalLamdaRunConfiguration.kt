@@ -13,18 +13,18 @@ import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.openapi.options.SettingsEditor
 import com.intellij.openapi.options.SettingsEditorGroup
 import com.intellij.openapi.options.ShowSettingsUtil
-import com.intellij.openapi.progress.ProgressIndicator
-import com.intellij.openapi.progress.ProgressManager
-import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.psi.NavigatablePsiElement
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.refactoring.listeners.RefactoringElementAdapter
 import com.intellij.refactoring.listeners.RefactoringElementListener
+import org.jetbrains.concurrency.isPending
 import software.amazon.awssdk.services.lambda.model.Runtime
 import software.aws.toolkits.core.credentials.ToolkitCredentialsProvider
 import software.aws.toolkits.core.region.AwsRegion
+import software.aws.toolkits.core.utils.getLogger
+import software.aws.toolkits.core.utils.info
 import software.aws.toolkits.core.utils.tryOrNull
 import software.aws.toolkits.jetbrains.services.lambda.Lambda.findPsiElementsForHandler
 import software.aws.toolkits.jetbrains.services.lambda.Lambda.isHandlerValid
@@ -36,8 +36,10 @@ import software.aws.toolkits.jetbrains.services.lambda.runtimeGroup
 import software.aws.toolkits.jetbrains.services.lambda.sam.SamCommon
 import software.aws.toolkits.jetbrains.services.lambda.sam.SamOptions
 import software.aws.toolkits.jetbrains.services.lambda.sam.SamTemplateUtils.findFunctionsFromTemplate
+import software.aws.toolkits.jetbrains.services.lambda.sam.SamVersionCache
 import software.aws.toolkits.jetbrains.services.lambda.validOrNull
 import software.aws.toolkits.jetbrains.settings.AwsSettingsConfigurable
+import software.aws.toolkits.jetbrains.settings.SamSettings
 import software.aws.toolkits.resources.message
 import java.io.File
 import java.nio.file.Path
@@ -54,19 +56,8 @@ class LocalLambdaRunConfiguration(project: Project, factory: ConfigurationFactor
     LambdaRunConfigurationBase<LocalLambdaOptions>(project, factory, "SAM CLI"),
     RefactoringListenerProvider {
 
-    private var isSamValidationCompleted = false
-    private var samValidationResult: String? = null
-
-    init {
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "aaa", false) {
-            override fun run(indicator: ProgressIndicator) {
-                samValidationResult = SamCommon.validate()
-            }
-
-            override fun onFinished() {
-                isSamValidationCompleted = true
-            }
-        })
+    companion object {
+        private val logger = getLogger<LocalLambdaRunConfiguration>()
     }
 
     override fun getOptions() = super.getOptions() as LocalLambdaOptions
@@ -79,10 +70,21 @@ class LocalLambdaRunConfiguration(project: Project, factory: ConfigurationFactor
     }
 
     override fun checkConfiguration() {
-        if (!isSamValidationCompleted)
-            throw RuntimeConfigurationError(message("lambda.run_configuration.sam.validation.in_progress"))
+        val executablePath = SamSettings.getInstance().executablePath
+            ?: throw RuntimeConfigurationError(
+                "SAM CLI executable path is not found. Please make sure it is installed and set up."
+            )
 
-        samValidationResult?.let {
+        val promise = SamVersionCache.evaluate(executablePath)
+
+        if (promise.isPending) {
+            logger.info { "Validation will proceed asynchronously for SAM CLI version" }
+            throw RuntimeConfigurationError(message("lambda.run_configuration.sam.validation.in_progress"))
+        }
+
+        val version = promise.blockingGet(0)!!
+
+        SamCommon.getInvalidVersionMessage(version)?.let {
             throw RuntimeConfigurationError(message("lambda.run_configuration.sam.invalid_executable", it)) {
                 ShowSettingsUtil.getInstance().showSettingsDialog(project, AwsSettingsConfigurable::class.java)
             }
