@@ -1,10 +1,11 @@
 .gradle
 out/
 target/
-/.idea/
+.idea
 build/
 *.iml
 .DS_Store
 Build/
 venv/
 guitest.log
+NuGet.Config
