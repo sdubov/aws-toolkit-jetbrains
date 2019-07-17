@@ -16,7 +16,7 @@
 
   <PropertyGroup>
     <SignAssembly>true</SignAssembly>
-    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)resharper-fsharp.snk</AssemblyOriginatorKeyFile>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)ReSharper.AWS.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
 
   <Import Project="RiderSdkPackageVersion.props" />

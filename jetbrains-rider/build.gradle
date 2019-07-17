@@ -1,9 +1,22 @@
-import java.util.regex.Pattern
-
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import java.util.regex.Pattern
+
 def backendGroup = 'backend'
+
+def resharperPluginPath = new File(projectDir, "ReSharper.AWS")
+def buildConfiguration = ext.properties["BuildConfiguration"] ?: "Debug"
+
+def pluginFiles = [
+        "AWS.Daemon/bin/$buildConfiguration/net461/AWS.Daemon.dll",
+        "AWS.Daemon/bin/$buildConfiguration/net461/AWS.Daemon.pdb",
+        "AWS.Psi/bin/$buildConfiguration/net461/AWS.Psi.dll",
+        "AWS.Psi/bin/$buildConfiguration/net461/AWS.Psi.pdb"
+]
+
+def nugetConfigPath = new File(projectDir, "NuGet.Config")
+def riderSdkVersionPropsPath = new File(resharperPluginPath, "RiderSdkPackageVersion.props")
 
 apply plugin: 'org.jetbrains.intellij'
 
@@ -28,23 +41,11 @@ intellij {
     instrumentCode = false
 }
 
-def resharperPluginPath = new File(projectDir, "ReSharper.AWS")
-def buildConfiguration = ext.properties["BuildConfiguration"] ?: "Debug"
-
-def pluginFiles = [
-        "AWS.Daemon/bin/$buildConfiguration/net461/AWS.Daemon.dll",
-        "AWS.Daemon/bin/$buildConfiguration/net461/AWS.Daemon.pdb",
-        "AWS.Psi/bin/$buildConfiguration/net461/AWS.Psi.dll",
-        "AWS.Psi/bin/$buildConfiguration/net461/AWS.Psi.pdb"
-]
-
-def nugetConfigPath = new File(projectDir, "NuGet.Config")
-def riderSdkVersionPropsPath = new File(resharperPluginPath, "RiderSdkPackageVersion.props")
-
 tasks.withType(prepareSandbox.class).all {
 
     def files = pluginFiles.collect { "$resharperPluginPath/src/$it" }
 
+    // TODO: Fix this
     if (name == prepareTestingSandbox.name) {
         def testHostPath = "$resharperPluginPath/test/src/FSharp.Tests.Host/bin/$buildConfiguration/net461"
         def testHostName = "$testHostPath/JetBrains.ReSharper.Plugins.FSharp.Tests.Host"
@@ -103,10 +104,6 @@ tasks.create("prepare") {
     group = backendGroup
     dependsOn writeNuGetConfig, writeRiderSdkVersionProps
 
-    doFirst {
-        println("SD -- [prepare] resharperPluginPath: ${resharperPluginPath}")
-    }
-
     doLast {
         exec {
             executable = "dotnet"
@@ -118,10 +115,6 @@ tasks.create("prepare") {
 tasks.create("buildReSharperPlugin") {
     group = backendGroup
     dependsOn prepare
-
-    doFirst {
-        println("SD -- [buildReSharperPlugin] resharperPluginPath: ${resharperPluginPath}")
-    }
 
     doLast {
         exec {
@@ -173,13 +166,11 @@ private String getRiderSdkPackageVersion() {
 
     versions.removeAll([null])
 
-    if (versions.size() > 1) {
+    if (versions.size() > 1)
         throw GradleException("Found multiple SDK packages matches name $sdkPackageName in $nugetPackagesPath")
-    }
 
-    if (versions.size() == 0) {
+    if (versions.size() == 0)
         throw GradleException("$sdkPackageName package is not found in $nugetPackagesPath")
-    }
 
     def version = versions.first()
     println("$sdkPackageName version is $version")
