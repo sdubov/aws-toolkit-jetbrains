@@ -1,4 +1,3 @@
-import toolkits.gradle.sdk.WriteConfig
 import java.util.regex.Pattern
 
 // Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
@@ -7,8 +6,6 @@ import java.util.regex.Pattern
 def backendGroup = 'backend'
 
 apply plugin: 'org.jetbrains.intellij'
-
-//bknd sdk: 2019.2.0-eap02
 
 dependencies {
     compile project(":jetbrains-core")
@@ -41,53 +38,8 @@ def pluginFiles = [
         "AWS.Psi/bin/$buildConfiguration/net461/AWS.Psi.pdb"
 ]
 
-def getNugetPackagesPath1() {
-    def sdkPath = intellij.ideaDependency.classes
-
-    println("SDK path: $sdkPath")
-    def path = new File(sdkPath, "lib/ReSharperHostSdk")
-
-    println("NuGet packages: $path")
-    if (!path.isDirectory()) throw GradleException("${path} does not exist or not a directory")
-
-    return path
-}
-
-def getRiderSdkPackageVersion() {
-    def sdkPackageName = "JetBrains.Rider.SDK"
-
-    def regex = Pattern.compile("JetBrains\\.Rider\\.SDK\\.([\\d\\.]+.*)\\.nupkg")
-    def versions = nugetPackagesPath
-            .listFiles()
-            .collect { file ->
-                def matches = regex.matcher(file.name)
-                if (matches.matches()) {
-                    matches[0][1]
-                } else {
-                    null
-                }
-            }
-
-    versions.removeAll([null])
-
-    if (versions.size() > 1) {
-        throw GradleException("Found multiple SDK packages matches name $sdkPackageName in $nugetPackagesPath")
-    }
-
-    if (versions.size() == 0) {
-        throw GradleException("$sdkPackageName package is not found in $nugetPackagesPath")
-    }
-
-    def version = versions.first()
-    println("$sdkPackageName version is $version")
-
-    return version
-}
-
 def nugetConfigPath = new File(projectDir, "NuGet.Config")
 def riderSdkVersionPropsPath = new File(resharperPluginPath, "RiderSdkPackageVersion.props")
-
-def riderTargetsGroup = "jetbrains-rider"
 
 tasks.withType(prepareSandbox.class).all {
 
@@ -116,59 +68,65 @@ tasks.withType(prepareSandbox.class).all {
     }
 }
 
-project.tasks.create("writeRiderSdkVersionProps", WriteConfig) {
-    group = riderTargetsGroup
-    configFile = riderSdkVersionPropsPath
-    configText = """<Project>
+tasks.create("writeRiderSdkVersionProps") {
+    group = backendGroup
+
+    doLast {
+        def riderSdkVersion = getRiderSdkPackageVersion()
+        def configText = """<Project>
   <PropertyGroup>
     <RiderSDKVersion>[${riderSdkVersion}]</RiderSDKVersion>
   </PropertyGroup>
 </Project>
 """
-
-    doFirst {
-        riderSdkVersion = getRiderSdkPackageVersion()
+        writeTextIfChanged(riderSdkVersionPropsPath, configText)
     }
 }
 
-project.tasks.create("writeNuGetConfig", WriteConfig) {
-    group = riderTargetsGroup
-    configFile = nugetConfigPath
-    configText = """<?xml version="1.0" encoding="utf-8"?>
+tasks.create("writeNuGetConfig") {
+    group = backendGroup
+
+    doLast {
+        def nugetPath = getNugetPackagesPath()
+        def configText = """<?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <packageSources>
-    <add key="resharper-sdk" value="${nugetPackagesPath}" />
+    <add key="resharper-sdk" value="${nugetPath}" />
   </packageSources>
 </configuration>
 """
-    doFirst {
-        nugetPackagesPath = getNugetPackagesPath1()
-        println("SD -- nuget packages path: ${nugetPackagesPath}")
+        writeTextIfChanged(nugetConfigPath, configText)
     }
 }
 
-project.tasks.create("prepare") {
-    group = riderTargetsGroup
+tasks.create("prepare") {
+    group = backendGroup
     dependsOn writeNuGetConfig, writeRiderSdkVersionProps
+
+    doFirst {
+        println("SD -- [prepare] resharperPluginPath: ${resharperPluginPath}")
+    }
+
     doLast {
         exec {
             executable = "dotnet"
-            args = ["restore", "${resharperPluginPath}/ReSharper.AWS.sln" ]
+            args = ["restore", "${resharperPluginPath.canonicalPath}/ReSharper.AWS.sln" ]
         }
     }
 }
 
-project.tasks.create("buildReSharperPlugin") {
-    group = riderTargetsGroup
-    dependsOn("prepare")
-    doLast {
-        doFirst {
-            println("SD -- ${resharperPluginPath}/ReSharper.AWS.sln")
-        }
+tasks.create("buildReSharperPlugin") {
+    group = backendGroup
+    dependsOn prepare
 
+    doFirst {
+        println("SD -- [buildReSharperPlugin] resharperPluginPath: ${resharperPluginPath}")
+    }
+
+    doLast {
         exec {
             executable = "msbuild"
-            args = [ "${resharperPluginPath}/ReSharper.AWS.sln" ]
+            args = [ "${resharperPluginPath.canonicalPath}/ReSharper.AWS.sln" ]
         }
     }
 }
@@ -184,6 +142,62 @@ runIde {
 
 jar {
     archiveBaseName = 'aws-intellij-toolkit-rider'
+}
+
+private File getNugetPackagesPath() {
+    def sdkPath = intellij.ideaDependency.classes
+
+    println("SDK path: $sdkPath")
+    def path = new File(sdkPath, "lib/ReSharperHostSdk")
+
+    println("NuGet packages: $path")
+    if (!path.isDirectory()) throw GradleException("${path} does not exist or not a directory")
+
+    return path
+}
+
+private String getRiderSdkPackageVersion() {
+    def sdkPackageName = "JetBrains.Rider.SDK"
+
+    def regex = Pattern.compile("JetBrains\\.Rider\\.SDK\\.([\\d\\.]+.*)\\.nupkg")
+    def versions = getNugetPackagesPath()
+            .listFiles()
+            .collect { file ->
+                def matches = regex.matcher(file.name)
+                if (matches.matches()) {
+                    matches[0][1]
+                } else {
+                    null
+                }
+            }
+
+    versions.removeAll([null])
+
+    if (versions.size() > 1) {
+        throw GradleException("Found multiple SDK packages matches name $sdkPackageName in $nugetPackagesPath")
+    }
+
+    if (versions.size() == 0) {
+        throw GradleException("$sdkPackageName package is not found in $nugetPackagesPath")
+    }
+
+    def version = versions.first()
+    println("$sdkPackageName version is $version")
+
+    return version
+}
+
+private static void writeTextIfChanged(File file, String content) {
+    def bytes = content.bytes
+
+    if (!file.isFile() || byteArrayToHexString(file.readBytes()) != byteArrayToHexString(bytes)) {
+        println("Writing ${file.canonicalPath}")
+        file.withOutputStream { it.write(bytes) }
+    }
+}
+
+private static String byteArrayToHexString(byte[] byteArray) {
+    return byteArray.encodeHex().toString()
 }
 
 defaultTasks("prepare")
