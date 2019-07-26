@@ -17,7 +17,6 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <projectTemplateProvider implementation="software.aws.toolkits.jetbrains.ui.wizard.RiderSamProjectProvider" order="last"/>
-        <codeInsight.lineMarkerProvider id="LambdaLineMarker" language="" implementationClass="software.aws.toolkits.jetbrains.services.lambda.upload.DotNetLambdaLineMarker"/>
     </extensions>
 
     <extensions defaultExtensionNs="aws.toolkit.lambda">

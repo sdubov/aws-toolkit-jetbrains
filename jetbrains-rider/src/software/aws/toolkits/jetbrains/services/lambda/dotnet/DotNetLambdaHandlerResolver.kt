@@ -44,13 +44,6 @@ class DotNetLambdaHandlerResolver : LambdaHandlerResolver {
         return arrayOf(RiderLambdaHandlerFakePsiElement(project, handler, fieldId))
     }
 
-    /**
-     * public APIGatewayProxyResponse FunctionHandler(APIGatewayProxyRequest apigProxyEvent, ILambdaContext context)
-     *
-     * returnType handler-name(inputType input, ILambdaContext context) {
-     *
-     * HelloWorld::HelloWorld.Function::FunctionHandler
-     */
     override fun determineHandler(element: PsiElement): String? = null
 
     override fun determineHandlers(element: PsiElement, file: VirtualFile): Set<String> {
