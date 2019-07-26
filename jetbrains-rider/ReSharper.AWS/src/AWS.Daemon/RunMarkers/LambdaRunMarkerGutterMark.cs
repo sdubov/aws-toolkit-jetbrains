@@ -68,11 +68,11 @@ namespace ReSharper.AWS.RunMarkers
 
     private string ComposeHandlerString(RunMarkerHighlighting runMarker)
     {
-      var projectDirectory = runMarker.Project.ProjectFileLocation.Parent.NameWithoutExtension;
+      var assemblyName = runMarker.Project.GetOutputAssemblyName(runMarker.TargetFrameworkId);
       var methodName = runMarker.Method.ShortName;
       var typeString = runMarker.FullName.Substring(0, runMarker.FullName.Length - methodName.Length - 1);
 
-      return $"{projectDirectory}::{typeString}::{methodName}";
+      return $"{assemblyName}::{typeString}::{methodName}";
     }
   }
 
