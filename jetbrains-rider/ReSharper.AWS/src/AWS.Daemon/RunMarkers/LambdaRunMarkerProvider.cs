@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using JetBrains.Annotations;
 using JetBrains.Application.Settings;
 using JetBrains.Metadata.Reader.API;
 using JetBrains.Metadata.Reader.Impl;
@@ -13,35 +14,40 @@ using JetBrains.ReSharper.Psi.Impl.Types;
 using JetBrains.ReSharper.Psi.Tree;
 using JetBrains.ReSharper.Psi.Util;
 using JetBrains.Util;
+using JetBrains.Util.Logging;
 
 namespace ReSharper.AWS.RunMarkers
 {
     [Language(typeof(CSharpLanguage))]
     public class LambdaRunMarkerProvider : IRunMarkerProvider
     {
+        private ILogger myLogger = Logger.GetLogger<LambdaRunMarkerProvider>();
+
         private static readonly IClrTypeName LambdaContextTypeName =
             new ClrTypeName("Amazon.Lambda.Core.ILambdaContext");
 
-        private static readonly List<IClrTypeName> AmazonLambdaEvents =
-            new List<IClrTypeName>
+        private static readonly List<string> AmazonLambdaEventNamespaces =
+            new List<string>
             {
-                new ClrTypeName("Amazon.Lambda.APIGatewayEvents"),
-                new ClrTypeName("Amazon.Lambda.ApplicationLoadBalancerEvents"),
-                new ClrTypeName("Amazon.Lambda.CloudWatchLogsEvents"),
-                new ClrTypeName("Amazon.Lambda.CognitoEvents"),
-                new ClrTypeName("Amazon.Lambda.ConfigEvents"),
-                new ClrTypeName("Amazon.Lambda.DynamoDBEvents"),
-                new ClrTypeName("Amazon.Lambda.LexEvents"),
-                new ClrTypeName("Amazon.Lambda.KinesisAnalyticsEvents"),
-                new ClrTypeName("Amazon.Lambda.KinesisEvents"),
-                new ClrTypeName("Amazon.Lambda.KinesisFirehoseEvents"),
-                new ClrTypeName("Amazon.Lambda.S3Events"),
-                new ClrTypeName("Amazon.Lambda.SimpleEmailEvents"),
-                new ClrTypeName("Amazon.Lambda.SNSEvents"),
-                new ClrTypeName("Amazon.Lambda.SQSEvents")
+                "Amazon.Lambda.APIGatewayEvents",
+                "Amazon.Lambda.ApplicationLoadBalancerEvents",
+                "Amazon.Lambda.CloudWatchLogsEvents",
+                "Amazon.Lambda.CognitoEvents",
+                "Amazon.Lambda.ConfigEvents",
+                "Amazon.Lambda.DynamoDBEvents",
+                "Amazon.Lambda.LexEvents",
+                "Amazon.Lambda.KinesisAnalyticsEvents",
+                "Amazon.Lambda.KinesisEvents",
+                "Amazon.Lambda.KinesisFirehoseEvents",
+                "Amazon.Lambda.S3Events",
+                "Amazon.Lambda.SimpleEmailEvents",
+                "Amazon.Lambda.SNSEvents",
+                "Amazon.Lambda.SQSEvents"
             };
 
         private static readonly IClrTypeName StreamTypeName = new ClrTypeName("System.IO.Stream");
+
+        private static readonly IClrTypeName SerializerLambdaType = new ClrTypeName("Amazon.Lambda.Core.ILambdaSerializer");
 
         private static readonly HashSet<IClrTypeName> LambdaInterfaces = new HashSet<IClrTypeName>(
             new List<IClrTypeName>
@@ -51,8 +57,6 @@ namespace ReSharper.AWS.RunMarkers
             });
 
         private const string HandlerName = "FunctionHandler";
-
-
 
 
 
@@ -82,10 +86,17 @@ namespace ReSharper.AWS.RunMarkers
 
         private bool IsSuitableLambdaMethod(IMethod method)
         {
+            var isPublic = IsPublic(method);
+            var isValidInstanceOrStaticMethod = IsValidInstanceOrStaticMethod(method);
+            var hasRequiredParameters = HasRequiredParameters(method);
+            var hasRequiredReturnType = HasRequiredReturnType(method);
+
+            return isPublic && isValidInstanceOrStaticMethod && hasRequiredParameters && hasRequiredReturnType;
+
             return IsPublic(method) &&
                    IsValidInstanceOrStaticMethod(method) &&
                    HasRequiredParameters(method) &&
-                   HasRequiredReturnType(method)
+                   HasRequiredReturnType(method);
         }
 
         private bool IsPublic(IMethod method)
@@ -95,8 +106,17 @@ namespace ReSharper.AWS.RunMarkers
 
         private bool IsValidInstanceOrStaticMethod(IMethod method)
         {
-            return method.IsStatic && method.ShortName != "Main" ||
-                   !method.IsStatic && CanBeInstantiatedByLambda(method.GetContainingType() as IClass);
+            var isStaticValid = method.IsStatic && method.ShortName != "Main";
+            if (isStaticValid) return true;
+
+            var classElement = method.GetContainingType() as IClass;
+            if (classElement == null)
+            {
+                myLogger.Warn("Expected IClass element, but got: " + method.GetContainingType()?.GetClrName());
+                return false;
+            }
+
+            return !method.IsStatic && CanBeInstantiatedByLambda(classElement);
         }
 
         private bool CanBeInstantiatedByLambda(IClass classElement)
@@ -123,10 +143,10 @@ namespace ReSharper.AWS.RunMarkers
                     return true;
 
                 case 1:
-                    return IsAmazonEventType(parameters[0].Type) || IsCustomDataType(parameters[0].Type);
+                    return IsStreamType(parameters[0].Type) || IsCustomDataType(method, parameters[0].Type);
 
                 case 2:
-                    return (IsAmazonEventType(parameters[0].Type) || IsCustomDataType(parameters[0].Type))
+                    return (IsStreamType(parameters[0].Type) || IsCustomDataType(method, parameters[0].Type))
                            && IsLambdaContextType(parameters[1]);
 
                 default:
@@ -134,28 +154,45 @@ namespace ReSharper.AWS.RunMarkers
             }
         }
 
+        private bool IsCustomDataType(IMethod method, IType type)
+        {
+            return type.IsValid() &&
+                   (IsAmazonEventType(type) || IsMethodOrAssemblySerializable(method));
+        }
+
         private bool IsAmazonEventType(IType type)
         {
             var clrName = (type as IDeclaredType)?.GetClrName();
-            return clrName != null && AmazonLambdaEvents.Any(amazonEventType => amazonEventType.Equals(clrName));
-        }
+            if (clrName == null) return false;
 
-        private bool IsCustomDataType(IType type)
-        {
-            return type.IsValid();
+            var symbolCache = type.GetPsiServices().Symbols;
+            var symbolScope = symbolCache.GetSymbolScope(type.Module, withReferences: true, caseSensitive: true);
+
+            foreach (var amazonEventNamespaceName in AmazonLambdaEventNamespaces)
+            {
+                var namespaceElement = symbolScope.GetNamespace(amazonEventNamespaceName);
+                var amazonEventClasses = namespaceElement?.GetNestedTypeElements(symbolScope).Where(element => element is IClass);
+
+                if (amazonEventClasses == null) continue;
+
+                if (amazonEventClasses.Any(eventClass => eventClass.GetClrName().Equals(clrName) ||
+                                                         IsDescendantOf(eventClass.GetClrName(), type.GetTypeElement())))
+                    return true;
+            }
+
+            return false;
         }
 
         private bool IsStreamType(IType type)
         {
             var streamType = new DeclaredTypeFromCLRName(StreamTypeName, new NullableAnnotation(), type.Module);
-
-            return (type as IDeclaredType)?.Equals(streamType) == true ||
-                   type.IsSubtypeOf(new DeclaredTypeFromCLRName(StreamTypeName, new NullableAnnotation(), type.Module));
+            return (type as IDeclaredType)?.Equals(streamType) == true || IsDescendantOf(streamType.GetClrName(), type.GetTypeElement());
         }
 
-        private bool IsSerializable(IMethod method)
+        // TODO: Check if this attribute will include an assembly or not
+        private bool IsMethodOrAssemblySerializable(IMethod method)
         {
-
+            return method.GetAttributeInstances(SerializerLambdaType, true).Any();
         }
 
         private bool IsLambdaContextType(IDeclaredElement element)
@@ -167,10 +204,10 @@ namespace ReSharper.AWS.RunMarkers
         private bool HasRequiredReturnType(IMethod method)
         {
             var taskReturnType = method.Module.GetPredefinedType().Task;
+            var returnType = method.ReturnType;
 
-            return !method.IsAsync && IsCustomDataType(method.ReturnType) ||
-                   method.IsAsync && (method.ReturnType.IsVoid() || method.ReturnType.Equals(taskReturnType) ||
-                                      method.ReturnType.IsSubtypeOf(taskReturnType));
+            return !method.IsAsync && (IsStreamType(returnType) || IsCustomDataType(method, returnType)) ||
+                   method.IsAsync && (method.ReturnType.IsVoid() || returnType.Equals(taskReturnType) || IsDescendantOf(taskReturnType.GetClrName(), returnType.GetTypeElement()));
 
         }
 
@@ -386,6 +423,15 @@ namespace ReSharper.AWS.RunMarkers
 //            var clrName = (type as IDeclaredType)?.GetClrName();
 //            return clrName != null && clrName.Equals(clrTypeName);
 //        }
+
+        public bool IsDescendantOf([NotNull] IClrTypeName baseTypeClrName, [CanBeNull] ITypeElement type)
+        {
+            if (type == null)
+                return false;
+
+            var baseType = TypeFactory.CreateTypeByCLRName(baseTypeClrName, type.Module);
+            return type.IsDescendantOf(baseType.GetTypeElement());
+        }
 
     }
 }
