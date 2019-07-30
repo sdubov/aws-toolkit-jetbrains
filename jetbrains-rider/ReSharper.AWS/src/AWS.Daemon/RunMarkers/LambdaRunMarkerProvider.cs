@@ -4,6 +4,7 @@ using JetBrains.Annotations;
 using JetBrains.Application.Settings;
 using JetBrains.Metadata.Reader.API;
 using JetBrains.Metadata.Reader.Impl;
+using JetBrains.ProjectModel;
 using JetBrains.ReSharper.Feature.Services.Daemon;
 using JetBrains.ReSharper.Host.Features.RunMarkers;
 using JetBrains.ReSharper.Psi;
@@ -15,6 +16,7 @@ using JetBrains.ReSharper.Psi.Tree;
 using JetBrains.ReSharper.Psi.Util;
 using JetBrains.Util;
 using JetBrains.Util.Logging;
+using IMethodDeclaration = JetBrains.ReSharper.Psi.CSharp.Tree.IMethodDeclaration;
 
 namespace ReSharper.AWS.RunMarkers
 {
@@ -47,27 +49,14 @@ namespace ReSharper.AWS.RunMarkers
 
         private static readonly IClrTypeName StreamTypeName = new ClrTypeName("System.IO.Stream");
 
-        private static readonly IClrTypeName SerializerLambdaType = new ClrTypeName("Amazon.Lambda.Core.ILambdaSerializer");
-
-        private static readonly HashSet<IClrTypeName> LambdaInterfaces = new HashSet<IClrTypeName>(
-            new List<IClrTypeName>
-            {
-                new ClrTypeName("Amazon.Lambda.APIGatewayEvents.APIGatewayProxyRequest"),
-                new ClrTypeName("Amazon.Lambda.APIGatewayEvents.APIGatewayProxyResponse")
-            });
-
-        private const string HandlerName = "FunctionHandler";
-
-
-
-
-
+        private static readonly IClrTypeName AmazonSerializerType = new ClrTypeName("Amazon.Lambda.Core.ILambdaSerializer");
 
         public double Priority => RunMarkerProviderPriority.DEFAULT;
 
         public void CollectRunMarkers(IFile file, IContextBoundSettingsStore settings, IHighlightingConsumer consumer)
         {
             if (!(file is ICSharpFile csharpFile)) return;
+            if (!IsLambdaProjectType(csharpFile.GetProject())) return;
 
             foreach (var declaration in CachedDeclarationsCollector.Run<IMethodDeclaration>(csharpFile))
             {
@@ -84,22 +73,32 @@ namespace ReSharper.AWS.RunMarkers
             }
         }
 
+        private bool IsLambdaProjectType(IProject project)
+        {
+            var isDotNetCore = project.IsDotNetCoreProject();
+            var amazonPackageReference = project.GetPackagesReference("Amazon.Lambda.Core");
+            var awsDefaultsJsonFiles =
+                project.GetAllProjectFiles(file => file.Name == "aws-lambda-tools-defaults.json");
+
+            return isDotNetCore && (amazonPackageReference != null || !awsDefaultsJsonFiles.IsEmpty());
+        }
+
         private bool IsSuitableLambdaMethod(IMethod method)
         {
-            var isPublic = IsPublic(method);
+            var isPublic = IsPublicMethod(method);
             var isValidInstanceOrStaticMethod = IsValidInstanceOrStaticMethod(method);
             var hasRequiredParameters = HasRequiredParameters(method);
             var hasRequiredReturnType = HasRequiredReturnType(method);
 
             return isPublic && isValidInstanceOrStaticMethod && hasRequiredParameters && hasRequiredReturnType;
 
-            return IsPublic(method) &&
+            return IsPublicMethod(method) &&
                    IsValidInstanceOrStaticMethod(method) &&
                    HasRequiredParameters(method) &&
                    HasRequiredReturnType(method);
         }
 
-        private bool IsPublic(IMethod method)
+        private bool IsPublicMethod(IMethod method)
         {
             return method.GetAccessRights() == AccessRights.PUBLIC;
         }
@@ -146,7 +145,7 @@ namespace ReSharper.AWS.RunMarkers
                     return IsStreamType(parameters[0].Type) || IsCustomDataType(method, parameters[0].Type);
 
                 case 2:
-                    return (IsStreamType(parameters[0].Type) || IsCustomDataType(method, parameters[0].Type))
+                    return IsStreamType(parameters[0].Type) || IsCustomDataType(method, parameters[0].Type)
                            && IsLambdaContextType(parameters[1]);
 
                 default:
@@ -157,7 +156,7 @@ namespace ReSharper.AWS.RunMarkers
         private bool IsCustomDataType(IMethod method, IType type)
         {
             return type.IsValid() &&
-                   (IsAmazonEventType(type) || IsMethodOrAssemblySerializable(method));
+                   (IsAmazonEventType(type) || IsSerializerDefined(method));
         }
 
         private bool IsAmazonEventType(IType type)
@@ -190,9 +189,9 @@ namespace ReSharper.AWS.RunMarkers
         }
 
         // TODO: Check if this attribute will include an assembly or not
-        private bool IsMethodOrAssemblySerializable(IMethod method)
+        private bool IsSerializerDefined(IMethod method)
         {
-            return method.GetAttributeInstances(SerializerLambdaType, true).Any();
+            return method.GetAttributeInstances(AmazonSerializerType, true).Any();
         }
 
         private bool IsLambdaContextType(IDeclaredElement element)
