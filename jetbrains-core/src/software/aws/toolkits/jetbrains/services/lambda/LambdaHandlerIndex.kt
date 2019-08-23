@@ -83,10 +83,10 @@ class LambdaHandlerIndex : ScalarIndexExtension<String>() {
 
         fun listHandlers(project: Project): Collection<String> {
             val index = FileBasedIndex.getInstance()
-            return index.getAllKeys(LambdaHandlerIndex.NAME, project)
+            return index.getAllKeys(NAME, project)
                 .filter {
                     // Filters out out-of-date data
-                    index.getValues(LambdaHandlerIndex.NAME, it, GlobalSearchScope.projectScope(project)).isNotEmpty()
+                    index.getValues(NAME, it, GlobalSearchScope.projectScope(project)).isNotEmpty()
                 }
         }
     }
