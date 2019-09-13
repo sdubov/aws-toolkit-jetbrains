@@ -16,7 +16,7 @@ buildscript {
 
 ext.resharperPluginPath = new File(projectDir, "ReSharper.AWS")
 
-def buildConfiguration = ext.properties["BuildConfiguration"] ?: "Debug"
+def buildConfiguration = ext.properties.get("BuildConfiguration") ?: "Debug"
 def pluginFiles = [
         "AWS.Localization/bin/$buildConfiguration/net461/AWS.Localization",
         "AWS.Daemon/bin/$buildConfiguration/net461/AWS.Daemon",
@@ -69,7 +69,7 @@ tasks.withType(prepareSandbox.class).all {
     doLast {
         files.each {
             def file = new File(it)
-            if (!file.isFile()) throw new GradleException("File $file does not exist")
+            if (!file.isFile()) throw new Throwable("File $file does not exist")
             logger.warn("$name: ${file.name} -> ${destinationDir}/${intellij.pluginName}/dotnet")
         }
     }

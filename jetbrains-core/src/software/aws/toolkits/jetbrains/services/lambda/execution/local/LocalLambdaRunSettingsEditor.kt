@@ -3,23 +3,39 @@
 
 package software.aws.toolkits.jetbrains.services.lambda.execution.local
 
+import com.intellij.openapi.components.service
 import com.intellij.openapi.options.SettingsEditor
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.rd.createNestedDisposable
+import com.intellij.openapi.rd.defineNestedLifetime
+import com.intellij.util.messages.MessageBus
+import com.intellij.util.text.SemVer
+import com.jetbrains.rd.util.lifetime.Lifetime
+import com.jetbrains.rd.util.lifetime.SequentialLifetimes
 import software.aws.toolkits.core.credentials.CredentialProviderNotFound
 import software.aws.toolkits.jetbrains.core.credentials.CredentialManager
 import software.aws.toolkits.jetbrains.core.credentials.ProjectAccountSettingsManager
 import software.aws.toolkits.jetbrains.core.region.AwsRegionProvider
 import software.aws.toolkits.jetbrains.services.lambda.LambdaBuilder
 import software.aws.toolkits.jetbrains.services.lambda.RuntimeGroup
+import software.aws.toolkits.jetbrains.services.lambda.validation.LambdaHandlerEvaluationListener
+import software.aws.toolkits.jetbrains.services.lambda.validation.LambdaHandlerValidator
+import software.aws.toolkits.jetbrains.services.lambda.validation.SamCliVersionEvaluationListener
 import software.aws.toolkits.jetbrains.utils.ui.selected
 import javax.swing.JComponent
 
 class LocalLambdaRunSettingsEditor(project: Project) : SettingsEditor<LocalLambdaRunConfiguration>() {
-    private val view = LocalLambdaRunSettingsEditorPanel(project)
+
+    private val view = LocalLambdaRunSettingsEditorPanel(project.defineNestedLifetime(), project)
     private val regionProvider = AwsRegionProvider.getInstance()
     private val credentialManager = CredentialManager.getInstance()
 
+    private val lifetimeDefinition = Lifetime.Eternal.createNested()
+    private val editorLifetime = SequentialLifetimes(lifetimeDefinition.lifetime)
+
     init {
+        project.service<LambdaHandlerValidator>().clearRequests()
+
         val supported = LambdaBuilder.supportedRuntimeGroups
             .flatMap { it.runtimes }
             .sorted()
@@ -39,6 +55,28 @@ class LocalLambdaRunSettingsEditor(project: Project) : SettingsEditor<LocalLambd
         if (accountSettingsManager.hasActiveCredentials()) {
             view.credentialSelector.setSelectedCredentialsProvider(accountSettingsManager.activeCredentialProvider)
         }
+
+        invalidateOnProfileValidationFinished(project.messageBus, editorLifetime.next())
+    }
+
+    private fun invalidateOnProfileValidationFinished(messageBus: MessageBus, lifetime: Lifetime) {
+        val connect = messageBus.connect(lifetime.createNestedDisposable(
+            debugName = "LocalLambdaRunSettingsEditor.invalidateOnProfileValidationFinished"))
+
+        connect.subscribe(
+            LambdaHandlerEvaluationListener.TOPIC,
+            object : LambdaHandlerEvaluationListener {
+                override fun handlerValidationFinished(handlerName: String, isHandlerExists: Boolean) {
+                    view.validityChanged.fire(Unit)
+                }
+            })
+
+        connect.subscribe(SamCliVersionEvaluationListener.TOPIC,
+            object : SamCliVersionEvaluationListener {
+                override fun samVersionValidationFinished(path: String, version: SemVer) {
+                    view.validityChanged.fire(Unit)
+                }
+            })
     }
 
     override fun createEditor(): JComponent = view.panel

@@ -15,8 +15,10 @@ import org.junit.rules.TemporaryFolder
 import software.aws.toolkits.resources.message
 import java.io.File
 import java.time.Instant
+import java.util.concurrent.ExecutionException
 
 class FileInfoCacheTest {
+
     @Rule
     @JvmField
     val tempFolder = TemporaryFolder()
@@ -40,8 +42,8 @@ class FileInfoCacheTest {
             }
         }
 
-        assertThat(infoProvider.evaluateBlocking(filePath)).isEqualTo(info)
-        assertThat(infoProvider.evaluateBlocking(filePath)).isEqualTo(info)
+        assertThat(infoProvider.evaluateBlocking(filePath).result).isEqualTo(info)
+        assertThat(infoProvider.evaluateBlocking(filePath).result).isEqualTo(info)
         assertThat(callCount).isEqualTo(1)
     }
 
@@ -72,7 +74,7 @@ class FileInfoCacheTest {
         Thread.sleep(1000)
         tempFile.setLastModified(Instant.now().toEpochMilli())
 
-        assertThat(infoProvider.evaluateBlocking(filePath)).isEqualTo(info)
+        assertThat(infoProvider.evaluateBlocking(filePath).result).isEqualTo(info)
         assertThat(callCount).isEqualTo(2)
     }
 
@@ -91,7 +93,7 @@ class FileInfoCacheTest {
             }
         }
 
-        assertThat(infoProvider.evaluateBlocking(filePath)).isEqualTo(info)
+        assertThat(infoProvider.evaluateBlocking(filePath).result).isEqualTo(info)
 
         // Mac timestamp granularity is 1 sec
         Thread.sleep(1000)
@@ -99,7 +101,7 @@ class FileInfoCacheTest {
         info = "v2"
         tempFile.writeText(info)
 
-        assertThat(infoProvider.evaluateBlocking(filePath)).isEqualTo(info)
+        assertThat(infoProvider.evaluateBlocking(filePath).result).isEqualTo(info)
         assertThat(callCount).isEqualTo(2)
     }
 
@@ -110,7 +112,7 @@ class FileInfoCacheTest {
         val pathPromise = infoProvider.evaluate(tempFile.absolutePath)
         waitAll(listOf(pathPromise))
 
-        assertThat(pathPromise.blockingGet(0)).isEqualTo("tempFile")
+        assertThat(pathPromise.blockingGet(0)!!.result).isEqualTo("tempFile")
 
         assertThat(infoProvider.testOnlyGetRequestCache()).hasSize(1)
             .describedAs("Cache size does not match expected value")
@@ -124,7 +126,7 @@ class FileInfoCacheTest {
         waitAll(listOf(pathPromise))
 
         // Get the value with no wait because the value should be already cached
-        val samePathPromise = infoProvider.evaluate(tempFile.absolutePath).blockingGet(0)
+        val samePathPromise = infoProvider.evaluate(tempFile.absolutePath).blockingGet(0)!!.result
         assertThat(samePathPromise).isEqualTo("tempFile")
 
         assertThat(infoProvider.testOnlyGetRequestCache()).hasSize(1)
@@ -141,8 +143,8 @@ class FileInfoCacheTest {
         val pathTempFile2Promise = infoProvider.evaluate(tempFile2.absolutePath)
         waitAll(listOf(pathTempFile1Promise, pathTempFile2Promise))
 
-        assertThat(pathTempFile1Promise.blockingGet(0)).isEqualTo("tempFile1")
-        assertThat(pathTempFile2Promise.blockingGet(0)).isEqualTo("tempFile2")
+        assertThat(pathTempFile1Promise.blockingGet(0)!!.result).isEqualTo("tempFile1")
+        assertThat(pathTempFile2Promise.blockingGet(0)!!.result).isEqualTo("tempFile2")
 
         assertThat(infoProvider.testOnlyGetRequestCache()).hasSize(2)
             .describedAs("Cache size does not match expected value")
@@ -152,7 +154,7 @@ class FileInfoCacheTest {
     fun multipleThreads_SameSamPath() {
         val threadsCount = 20
         val tempFile = tempFolder.newFile()
-        val results = ContainerUtil.newConcurrentSet<Promise<String>>()
+        val results = ContainerUtil.newConcurrentSet<Promise<FileInfoCache.InfoResult<String>>>()
         val infoProvider = TestFileInfoCache()
 
         val info = "v1"
@@ -173,7 +175,7 @@ class FileInfoCacheTest {
         assertThat(results).hasSize(1).describedAs("Number of threads does not match expected value")
 
         for (result in results) {
-            assertThat(result.blockingGet(0)).isEqualTo(info)
+            assertThat(result.blockingGet(0)!!.result).isEqualTo(info)
         }
 
         assertThat(infoProvider.testOnlyGetRequestCache()).hasSize(1)
@@ -185,8 +187,26 @@ class FileInfoCacheTest {
         val invalidPath = "invalid_path"
 
         assertThatThrownBy { TestFileInfoCache().evaluateBlocking(invalidPath) }
+            .isInstanceOf(ExecutionException::class.java)
+            .hasMessage("java.io.FileNotFoundException: $invalidPath (No such file or directory)")
+    }
+
+    @Test
+    fun testDeleteFileAfterReadingFromIt() {
+        val tempFile = tempFolder.newFile()
+        val path = tempFile.absolutePath
+
+        val testFileInfoCache = object : FileInfoCache<String>() {
+            override fun getFileInfo(path: String): String {
+                val file = File(path)
+                return try { file.readText() }
+                finally { file.delete() }
+            }
+        }
+
+        assertThatThrownBy { testFileInfoCache.evaluateBlocking(path) }
             .isInstanceOf(IllegalStateException::class.java)
-            .hasMessage(message("general.file_not_found", invalidPath))
+            .hasMessage(message("general.file_not_found", path))
     }
 
     private class TestFileInfoCache : FileInfoCache<String>() {

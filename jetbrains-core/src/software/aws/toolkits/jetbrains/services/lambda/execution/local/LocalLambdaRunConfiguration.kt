@@ -10,6 +10,7 @@ import com.intellij.execution.configurations.ConfigurationFactory
 import com.intellij.execution.configurations.RefactoringListenerProvider
 import com.intellij.execution.configurations.RuntimeConfigurationError
 import com.intellij.execution.runners.ExecutionEnvironment
+import com.intellij.openapi.components.service
 import com.intellij.openapi.options.SettingsEditor
 import com.intellij.openapi.options.SettingsEditorGroup
 import com.intellij.openapi.options.ShowSettingsUtil
@@ -30,17 +31,19 @@ import software.aws.toolkits.core.utils.getLogger
 import software.aws.toolkits.core.utils.info
 import software.aws.toolkits.core.utils.tryOrNull
 import software.aws.toolkits.jetbrains.services.lambda.Lambda.findPsiElementsForHandler
-import software.aws.toolkits.jetbrains.services.lambda.Lambda.isHandlerValid
 import software.aws.toolkits.jetbrains.services.lambda.LambdaHandlerResolver
 import software.aws.toolkits.jetbrains.services.lambda.RuntimeGroup
-import software.aws.toolkits.jetbrains.services.lambda.execution.LambdaRunConfigurationType
 import software.aws.toolkits.jetbrains.services.lambda.execution.LambdaRunConfigurationBase
+import software.aws.toolkits.jetbrains.services.lambda.execution.LambdaRunConfigurationType
 import software.aws.toolkits.jetbrains.services.lambda.runtimeGroup
 import software.aws.toolkits.jetbrains.services.lambda.sam.SamCommon
 import software.aws.toolkits.jetbrains.services.lambda.sam.SamOptions
-import software.aws.toolkits.jetbrains.services.lambda.sam.SamTemplateUtils.findFunctionsFromTemplate
+import software.aws.toolkits.jetbrains.services.lambda.sam.SamTemplateUtils
 import software.aws.toolkits.jetbrains.services.lambda.sam.SamVersionCache
 import software.aws.toolkits.jetbrains.services.lambda.validOrNull
+import software.aws.toolkits.jetbrains.services.lambda.validation.LambdaHandlerEvaluationListener
+import software.aws.toolkits.jetbrains.services.lambda.validation.LambdaHandlerValidator
+import software.aws.toolkits.jetbrains.services.lambda.validation.SamCliVersionEvaluationListener
 import software.aws.toolkits.jetbrains.settings.AwsSettingsConfigurable
 import software.aws.toolkits.jetbrains.settings.SamSettings
 import software.aws.toolkits.resources.message
@@ -48,16 +51,18 @@ import java.nio.file.Path
 
 class LocalLambdaRunConfigurationFactory(configuration: LambdaRunConfigurationType) : ConfigurationFactory(configuration) {
     override fun createTemplateConfiguration(project: Project) = LocalLambdaRunConfiguration(project, this)
-
     override fun getName(): String = "Local"
 }
 
 class LocalLambdaRunConfiguration(project: Project, factory: ConfigurationFactory) :
     LambdaRunConfigurationBase<LocalLambdaOptions>(project, factory, "SAM CLI"),
     RefactoringListenerProvider {
+
     companion object {
         private val logger = getLogger<LocalLambdaRunConfiguration>()
     }
+
+    private val messageBus = project.messageBus
 
     override val lambdaOptions = LocalLambdaOptions()
 
@@ -69,18 +74,30 @@ class LocalLambdaRunConfiguration(project: Project, factory: ConfigurationFactor
     }
 
     override fun checkConfiguration() {
+        checkSamVersion()
+        resolveCredentials()
+        checkLambdaHandler()
+        checkRegion()
+        checkInput()
+    }
+
+    private fun checkSamVersion() {
         val executablePath = SamSettings.getInstance().executablePath
             ?: throw RuntimeConfigurationError(message("sam.cli_not_configured"))
 
         val promise = SamVersionCache.evaluate(executablePath)
-
         if (promise.isPending) {
+            promise.then { version ->
+                messageBus.syncPublisher(
+                    SamCliVersionEvaluationListener.TOPIC).samVersionValidationFinished(executablePath, version.result)
+            }
+
             logger.info { "Validation will proceed asynchronously for SAM CLI version" }
             throw RuntimeConfigurationError(message("lambda.run_configuration.sam.validation.in_progress"))
         }
 
         val errorMessage = try {
-            val semVer = promise.blockingGet(0)!!
+            val semVer = promise.blockingGet(0)!!.result
             SamCommon.getInvalidVersionMessage(semVer)
         } catch (e: Exception) {
             ExceptionUtil.getRootCause(e).message ?: message("general.unknown_error")
@@ -91,20 +108,35 @@ class LocalLambdaRunConfiguration(project: Project, factory: ConfigurationFactor
                 ShowSettingsUtil.getInstance().showSettingsDialog(project, AwsSettingsConfigurable::class.java)
             }
         }
+    }
 
-        resolveCredentials()
+    private fun checkLambdaHandler() {
+        val handlerValidator = project.service<LambdaHandlerValidator>()
+        val (handler, runtime) = resolveLambdaInfo(project = project, functionOptions = lambdaOptions.functionOptions)
+        val promise = handlerValidator.evaluate(LambdaHandlerValidator.LambdaEntry(project, runtime, handler))
 
-        val (handler, runtime) = resolveLambdaInfo()
-        if (!isHandlerValid(project, runtime, handler))
+        if (promise.isPending) {
+            promise.then { isValid ->
+                messageBus.syncPublisher(
+                    LambdaHandlerEvaluationListener.TOPIC).handlerValidationFinished(handler, isValid)
+            }
+
+            logger.info { "Validation will proceed asynchronously for SAM CLI version" }
+            throw RuntimeConfigurationError(message("lambda.run_configuration.handler.validation.in_progress"))
+        }
+
+        val isHandlerValid = promise.blockingGet(0)!!
+        if (!isHandlerValid)
             throw RuntimeConfigurationError(message("lambda.run_configuration.handler_not_found", handler))
+    }
 
+    private fun checkRegion() {
         regionId() ?: throw RuntimeConfigurationError(message("lambda.run_configuration.no_region_specified"))
-        checkInput()
     }
 
     override fun getState(executor: Executor, environment: ExecutionEnvironment): SamRunningState {
         try {
-            val (handler, runtime, templateDetails) = resolveLambdaInfo()
+            val (handler, runtime, templateDetails) = resolveLambdaInfo(project = project, functionOptions = lambdaOptions.functionOptions)
             val psiElement = handlerPsiElement(handler, runtime)
                 ?: throw RuntimeConfigurationError(message("lambda.run_configuration.handler_not_found", handler))
 
@@ -248,19 +280,16 @@ class LocalLambdaRunConfiguration(project: Project, factory: ConfigurationFactor
             ?.handlerDisplayName(handler) ?: handler
     }
 
-    private fun resolveLambdaInfo() = if (isUsingTemplate()) {
-        val templatePath = templateFile()
-            ?.takeUnless { it.isEmpty() }
+    private fun resolveLambdaFromTemplate(project: Project, templatePath: String?, functionName: String?): Triple<String, Runtime, SamTemplateDetails?> {
+        templatePath?.takeUnless { it.isEmpty() }
             ?: throw RuntimeConfigurationError(message("lambda.run_configuration.sam.no_template_specified"))
 
-        val functionName = logicalId() ?: throw RuntimeConfigurationError(
-            message("lambda.run_configuration.sam.no_function_specified")
-        )
+        functionName ?: throw RuntimeConfigurationError(message("lambda.run_configuration.sam.no_function_specified"))
 
         val templateFile = LocalFileSystem.getInstance().findFileByPath(templatePath)
             ?: throw RuntimeConfigurationError(message("lambda.run_configuration.sam.template_file_not_found"))
 
-        val function = findFunctionsFromTemplate(
+        val function = SamTemplateUtils.findFunctionsFromTemplate(
             project,
             templateFile
         ).find { it.logicalName == functionName }
@@ -274,18 +303,32 @@ class LocalLambdaRunConfiguration(project: Project, factory: ConfigurationFactor
 
         val handler = tryOrNull { function.handler() }
             ?: throw RuntimeConfigurationError(message("lambda.run_configuration.no_handler_specified"))
+
         val runtime = tryOrNull { Runtime.fromValue(function.runtime()).validOrNull }
             ?: throw RuntimeConfigurationError(message("lambda.run_configuration.no_runtime_specified"))
 
-        Triple(handler, runtime, SamTemplateDetails(VfsUtil.virtualToIoFile(templateFile).toPath(), functionName))
-    } else {
-        val handler = handler()
-            ?: throw RuntimeConfigurationError(message("lambda.run_configuration.no_handler_specified"))
-        val runtime = runtime()
-            ?: throw RuntimeConfigurationError(message("lambda.run_configuration.no_runtime_specified"))
-
-        Triple(handler, runtime, null)
+        return Triple(handler, runtime, SamTemplateDetails(VfsUtil.virtualToIoFile(templateFile).toPath(), functionName))
     }
+
+    private fun resolveLambdaFromHandler(handler: String?, runtime: Runtime?): Triple<String, Runtime, SamTemplateDetails?> {
+        handler ?: throw RuntimeConfigurationError(message("lambda.run_configuration.no_handler_specified"))
+        runtime ?: throw RuntimeConfigurationError(message("lambda.run_configuration.no_runtime_specified"))
+        return Triple(handler, runtime, null)
+    }
+
+    private fun resolveLambdaInfo(project: Project, functionOptions: FunctionOptions): Triple<String, Runtime, SamTemplateDetails?> =
+        if (functionOptions.useTemplate) {
+            resolveLambdaFromTemplate(
+                project = project,
+                templatePath = functionOptions.templateFile,
+                functionName = functionOptions.logicalId
+            )
+        } else {
+            resolveLambdaFromHandler(
+                handler = functionOptions.handler,
+                runtime = Runtime.fromValue(functionOptions.runtime)?.validOrNull
+            )
+        }
 
     private fun handlerPsiElement(handler: String? = handler(), runtime: Runtime? = runtime()) = try {
         runtime?.let {

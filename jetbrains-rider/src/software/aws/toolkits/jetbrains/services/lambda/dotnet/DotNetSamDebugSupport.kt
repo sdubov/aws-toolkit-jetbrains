@@ -280,12 +280,6 @@ class DotNetSamDebugSupport : SamDebugSupport {
         sessionModel: DotNetDebuggerSessionModel,
         outputEventsListener: IDebuggerOutputListener
     ): XDebugProcessStarter {
-        val consoleKind = ConsoleKind.ExternalConsole
-        (executionConsole as? ConsoleView)
-            ?.print(
-                "Input/Output redirection disabled: ${consoleKind.message}${System.lineSeparator()}",
-                ConsoleViewContentType.SYSTEM_OUTPUT
-            )
 
         val fireInitializedManually = env.getUserData(DotNetDebugRunner.FIRE_INITIALIZED_MANUALLY) ?: false
 
