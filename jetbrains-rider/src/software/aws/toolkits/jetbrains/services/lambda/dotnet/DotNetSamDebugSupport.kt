@@ -28,6 +28,7 @@ import com.jetbrains.rd.util.lifetime.isAlive
 import com.jetbrains.rd.util.lifetime.onTermination
 import com.jetbrains.rd.util.put
 import com.jetbrains.rd.util.reactive.adviseUntil
+import com.jetbrains.rd.util.string.print
 import com.jetbrains.rdclient.protocol.RdDispatcher
 import com.jetbrains.rider.RiderEnvironment
 import com.jetbrains.rider.debugger.DebuggerWorkerPlatform
@@ -38,9 +39,9 @@ import com.jetbrains.rider.debugger.actions.utils.OptionsUtil
 import com.jetbrains.rider.model.debuggerWorker.DotNetCoreExeStartInfo
 import com.jetbrains.rider.model.debuggerWorker.DotNetCoreInfo
 import com.jetbrains.rider.model.debuggerWorker.DotNetDebuggerSessionModel
+import com.jetbrains.rider.model.debuggerWorker.OutputType
 import com.jetbrains.rider.model.debuggerWorkerConnectionHelperModel
 import com.jetbrains.rider.projectView.solution
-import com.jetbrains.rider.run.ConsoleKind
 import com.jetbrains.rider.run.IDebuggerOutputListener
 import com.jetbrains.rider.run.bindToSettings
 import org.jetbrains.concurrency.AsyncPromise
@@ -186,6 +187,17 @@ class DotNetSamDebugSupport : SamDebugSupport {
 
                     workerModel.activeSession.set(sessionModel)
                     val console = TextConsoleBuilderFactory.getInstance().createBuilder(environment.project).console
+
+                    sessionModel.targetOutput.advise(debuggerLifetime) { outputMessage ->
+                        console.print(outputMessage.output, ConsoleViewContentType.SYSTEM_OUTPUT)
+                        (console as? ConsoleView)?.print(outputMessage.output, ConsoleViewContentType.SYSTEM_OUTPUT)
+                    }
+
+                    sessionModel.debuggerOutput.advise(debuggerLifetime) { outputMessage ->
+                        console.print(outputMessage.output, ConsoleViewContentType.SYSTEM_OUTPUT)
+                        (console as? ConsoleView)?.print(outputMessage.output, ConsoleViewContentType.SYSTEM_OUTPUT)
+                    }
+
                     val processHandler = object : ProcessHandler() {
                         override fun detachProcessImpl() {
                             destroyProcessImpl()
@@ -280,12 +292,6 @@ class DotNetSamDebugSupport : SamDebugSupport {
         sessionModel: DotNetDebuggerSessionModel,
         outputEventsListener: IDebuggerOutputListener
     ): XDebugProcessStarter {
-        val consoleKind = ConsoleKind.ExternalConsole
-        (executionConsole as? ConsoleView)
-            ?.print(
-                "Input/Output redirection disabled: ${consoleKind.message}${System.lineSeparator()}",
-                ConsoleViewContentType.SYSTEM_OUTPUT
-            )
 
         val fireInitializedManually = env.getUserData(DotNetDebugRunner.FIRE_INITIALIZED_MANUALLY) ?: false
 
