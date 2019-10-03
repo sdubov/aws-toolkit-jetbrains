@@ -193,10 +193,10 @@ class DotNetSamDebugSupport : SamDebugSupport {
                         (console as? ConsoleView)?.print(outputMessage.output, ConsoleViewContentType.SYSTEM_OUTPUT)
                     }
 
-                    sessionModel.debuggerOutput.advise(debuggerLifetime) { outputMessage ->
-                        console.print(outputMessage.output, ConsoleViewContentType.SYSTEM_OUTPUT)
-                        (console as? ConsoleView)?.print(outputMessage.output, ConsoleViewContentType.SYSTEM_OUTPUT)
-                    }
+//                    sessionModel.debuggerOutput.advise(debuggerLifetime) { outputMessage ->
+//                        console.print(outputMessage.output, ConsoleViewContentType.SYSTEM_OUTPUT)
+//                        (console as? ConsoleView)?.print(outputMessage.output, ConsoleViewContentType.SYSTEM_OUTPUT)
+//                    }
 
                     val processHandler = object : ProcessHandler() {
                         override fun detachProcessImpl() {
@@ -307,7 +307,8 @@ class DotNetSamDebugSupport : SamDebugSupport {
                     fireInitializedManually = fireInitializedManually,
                     customListener = outputEventsListener,
                     debugKind = OptionsUtil.toDebugKind(sessionModel.sessionProperties.debugKind.valueOrNull),
-                    project = env.project)
+                    project = env.project,
+                    sessionId = env.executionId)
         }
     }
 }

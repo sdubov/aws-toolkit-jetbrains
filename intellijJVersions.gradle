@@ -94,6 +94,12 @@ static def ideProfiles() {
                         "JavaScriptDebugger",
                         "CSS",
                     ]
+                ],
+                "RD": [
+                    version: "RD-2019.3-SNAPSHOT",
+                    plugins: [
+                        "yaml"
+                    ]
                 ]
             ]
     ]

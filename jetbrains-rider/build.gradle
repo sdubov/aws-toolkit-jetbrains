@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 buildscript {
-    ext.rd_version = "0.192.36"
+//    ext.rd_version = "0.192.36"
+    ext.rd_version = "0.193.42"
 
     repositories {
         maven { url 'https://www.myget.org/F/rd-snapshots/maven/' }
