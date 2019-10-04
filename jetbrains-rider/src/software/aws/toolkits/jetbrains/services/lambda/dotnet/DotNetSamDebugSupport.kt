@@ -194,6 +194,7 @@ class DotNetSamDebugSupport : SamDebugSupport {
                     }
 
 //                    sessionModel.debuggerOutput.advise(debuggerLifetime) { outputMessage ->
+//                        println("SD -- " + outputMessage.output)
 //                        console.print(outputMessage.output, ConsoleViewContentType.SYSTEM_OUTPUT)
 //                        (console as? ConsoleView)?.print(outputMessage.output, ConsoleViewContentType.SYSTEM_OUTPUT)
 //                    }
