@@ -98,7 +98,8 @@ static def ideProfiles() {
                 "RD": [
                     version: "RD-2019.3-SNAPSHOT",
                     plugins: [
-                        "yaml"
+                        "yaml",
+                        "docker"
                     ]
                 ]
             ]

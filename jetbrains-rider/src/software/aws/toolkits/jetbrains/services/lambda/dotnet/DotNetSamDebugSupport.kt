@@ -3,6 +3,10 @@
 
 package software.aws.toolkits.jetbrains.services.lambda.dotnet
 
+import com.intellij.docker.DockerConfigurablesUtil
+import com.intellij.docker.agent.DockerUtil
+import com.intellij.docker.compose.configuration.beans.common.DockerComposeServiceBase
+import com.intellij.docker.view.DockerServiceViewContributor
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.filters.TextConsoleBuilderFactory
 import com.intellij.execution.process.BaseProcessHandler
@@ -41,6 +45,7 @@ import com.jetbrains.rider.model.debuggerWorker.DotNetCoreInfo
 import com.jetbrains.rider.model.debuggerWorker.DotNetDebuggerSessionModel
 import com.jetbrains.rider.model.debuggerWorker.OutputType
 import com.jetbrains.rider.model.debuggerWorkerConnectionHelperModel
+import com.jetbrains.rider.plugins.docker.debug.DockerConfigurationInfo
 import com.jetbrains.rider.projectView.solution
 import com.jetbrains.rider.run.IDebuggerOutputListener
 import com.jetbrains.rider.run.bindToSettings
