@@ -120,7 +120,7 @@ public class LambdaInputPanel {
     }
 
     private void createUIComponents() {
-        EditorTextFieldProvider textFieldProvider = ServiceManager.getService(project, EditorTextFieldProvider.class);
+        EditorTextFieldProvider textFieldProvider = ServiceManager.getService(EditorTextFieldProvider.class);
         inputText = textFieldProvider.getEditorField(JsonLanguage.INSTANCE, project, Collections.emptyList());
 
         eventComboBoxModel = new SortedComboBoxModel<>(Comparator.comparing(LambdaSampleEvent::getName));

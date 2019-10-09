@@ -4,6 +4,7 @@
 package software.aws.toolkits.jetbrains.core.region
 
 import com.intellij.openapi.components.ServiceManager
+import com.intellij.serviceContainer.NonInjectable
 import software.aws.toolkits.core.region.AwsRegion
 import software.aws.toolkits.core.region.Partition
 import software.aws.toolkits.core.region.PartitionParser

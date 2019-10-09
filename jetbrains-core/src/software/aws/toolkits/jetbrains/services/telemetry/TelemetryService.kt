@@ -7,11 +7,14 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.ServiceManager
 import com.intellij.openapi.project.Project
+import com.intellij.serviceContainer.NonInjectable
 import com.intellij.util.messages.Topic
+import org.jetbrains.annotations.TestOnly
 import software.amazon.awssdk.services.toolkittelemetry.model.Unit
 import software.aws.toolkits.core.telemetry.DefaultMetricEvent
 import software.aws.toolkits.core.telemetry.DefaultMetricEvent.Companion.METADATA_NA
 import software.aws.toolkits.core.telemetry.DefaultMetricEvent.Companion.METADATA_NOT_SET
+import software.aws.toolkits.core.telemetry.DefaultTelemetryBatcher
 import software.aws.toolkits.core.telemetry.MetricEvent
 import software.aws.toolkits.core.telemetry.TelemetryBatcher
 import software.aws.toolkits.core.utils.getLogger
@@ -75,14 +78,19 @@ interface TelemetryEnabledChangedNotifier {
     fun notify(isTelemetryEnabled: Boolean)
 }
 
-class DefaultTelemetryService(settings: AwsSettings, private val batcher: TelemetryBatcher) : TelemetryService, TelemetryEnabledChangedNotifier {
+class DefaultTelemetryService(settings: AwsSettings) : TelemetryService, TelemetryEnabledChangedNotifier {
     private val isDisposing: AtomicBoolean = AtomicBoolean(false)
     private val startTime: Instant
+    private var batcher: TelemetryBatcher
 
-    @Suppress("unused")
-    constructor(settings: AwsSettings) : this(settings, DefaultToolkitTelemetryBatcher())
+    @TestOnly
+    @NonInjectable
+    constructor(settings: AwsSettings, batcher: TelemetryBatcher) : this(settings) {
+        this.batcher = batcher
+    }
 
     init {
+        batcher = DefaultToolkitTelemetryBatcher()
         TelemetryService.subscribe(this)
         TelemetryService.syncPublisher().notify(settings.isTelemetryEnabled)
 

@@ -282,6 +282,7 @@ class DotNetSamDebugSupport : SamDebugSupport {
             executeAsIs = false,
             useExternalConsole = false,
             needToBeInitializedImmediately = true
+
         )
 
     private fun createAndStartSession(

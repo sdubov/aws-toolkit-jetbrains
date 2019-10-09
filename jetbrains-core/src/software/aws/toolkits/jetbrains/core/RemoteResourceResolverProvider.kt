@@ -23,9 +23,15 @@ interface RemoteResourceResolverProvider {
     }
 }
 
-class DefaultRemoteResourceResolverProvider @JvmOverloads constructor(private val resolver: RemoteResourceResolver = RESOLVER_INSTANCE) :
-    RemoteResourceResolverProvider {
+class DefaultRemoteResourceResolverProvider : RemoteResourceResolverProvider {
+
+    private val resolver: RemoteResourceResolver
+
     override fun get() = resolver
+
+    init {
+        resolver = RESOLVER_INSTANCE
+    }
 
     companion object {
 
