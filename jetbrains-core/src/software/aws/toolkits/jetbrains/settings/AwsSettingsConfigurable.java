@@ -105,6 +105,10 @@ public class AwsSettingsConfigurable implements SearchableConfigurable {
     protected void apply(SamExecutableDetector detector) throws ConfigurationException {
         SamSettings samSettings = SamSettings.getInstance();
 
+        boolean isSelected = showAllHandlerGutterIcons.isSelected();
+        this.project.getMessageBus().syncPublisher(
+            LambdaSettingsChangeListener.Companion.getTOPIC()).samShowAllHandlerGutterIconsSettingsChange(isSelected);
+
         String path = getSamExecutablePath();
         // only validate if path is not empty and has changed since last save
         boolean changed = (path != null && !path.equals(samSettings.getSavedExecutablePath()));
