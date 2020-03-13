@@ -47,7 +47,7 @@ class ArtifactMappingPopup {
 }
 
 class ArtifactMappingPopupStep(paths: List<ArtifactMapping>, private val onSelected: (ArtifactMapping?) -> Unit) :
-    BaseListPopupStep<ArtifactMapping>(message("cloud_debug.run_configuration.generate_automatically.popup_title"), paths) {
+    BaseListPopupStep<ArtifactMapping>(message("cloud_debug.run_configuration.auto_fill_link.popup_title"), paths) {
 
     override fun isSpeedSearchEnabled(): Boolean = true
 
